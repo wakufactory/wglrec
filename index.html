@@ -1,0 +1,214 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Three.js Frame-by-Frame Encoder (WebCodecs + Worker)</title>
+<style>
+  body { font: 14px/1.6 system-ui; margin: 24px; }
+  fieldset { border:1px solid #ddd; padding:12px; margin-bottom:12px; }
+  label { margin-right: 12px; display:inline-flex; align-items:center; gap:6px; }
+  input[type=number] { width: 6em; }
+  button { padding: 8px 14px; margin-right: 8px; }
+  #row { display:flex; gap:24px; align-items:flex-start; }
+  #preview { border:1px solid #ddd; background:#000; }
+  #log { white-space: pre-wrap; border: 1px solid #eee; padding: 8px; height: 200px; overflow:auto; }
+  a#dl { display:none; }
+</style>
+
+<h1>Three.js オフラインレンダリング（1フレームプレビュー付き）</h1>
+
+<fieldset>
+  <legend>レンダリング設定</legend>
+  <label>Width <input id="w" type="number" value="1280" step="1" min="16"></label>
+  <label>Height <input id="h" type="number" value="720" step="1" min="16"></label>
+  <label>Duration(sec) <input id="sec" type="number" value="5" step="0.1" min="0.1"></label>
+  <label>FPS <input id="fps" type="number" value="30" step="1" min="1"></label>
+  <label>Keyframe every(s) <input id="gopSec" type="number" value="2" step="0.5" min="0.5"></label>
+  <label>Bitrate(Mbps) <input id="mbps" type="number" value="6" step="0.5" min="1"></label>
+</fieldset>
+
+<fieldset>
+  <legend>プレビュー</legend>
+  <div id="row">
+    <!-- Workerへ譲渡する実キャンバス（直接表示しない） -->
+    <canvas id="hiddenCanvas" width="1280" height="720" style="display:none"></canvas>
+    <!-- プレビュー表示用（メインスレッドで描くだけの2D） -->
+    <div>
+      <canvas id="preview" width="640" height="360"></canvas>
+      <div style="margin-top:8px;">
+        <label>Preview at t = <input id="pvSec" type="number" value="0.0" step="0.033" min="0"></label> sec
+        <button id="btnPreview">1フレームプレビュー</button>
+      </div>
+      <div style="opacity:.8;font-size:12px;">※ プレビューはレンダリング結果のスナップショットです（動画品質には影響しません）</div>
+    </div>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>エクスポート</legend>
+  <button id="btnRender">レンダリング開始（WebM出力）</button>
+  <a id="dl" download="render.webm">Download render.webm</a>
+</fieldset>
+
+<div id="log"></div>
+
+<script type="module">
+  // ========== UI要素 ==========
+  const wEl = document.getElementById('w');
+  const hEl = document.getElementById('h');
+  const secEl = document.getElementById('sec');
+  const fpsEl = document.getElementById('fps');
+  const gopSecEl = document.getElementById('gopSec');
+  const mbpsEl = document.getElementById('mbps');
+
+  const hiddenCanvas = document.getElementById('hiddenCanvas'); // Offscreen化してWorkerへ
+  const previewCanvas = document.getElementById('preview');     // 表示専用
+  const previewCtx = previewCanvas.getContext('2d');
+
+  const pvSecEl = document.getElementById('pvSec');
+  const btnPreview = document.getElementById('btnPreview');
+
+  const btnRender = document.getElementById('btnRender');
+  const dl = document.getElementById('dl');
+  const logEl = document.getElementById('log');
+  function log(...args){
+    console.log(...args);
+    logEl.textContent += args.join(' ') + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  console.log('[main] script loaded');
+  fetch('./worker.js?' + String(Date.now()))
+    .then((res) => {
+      console.log('[main] fetch worker.js status', res.status, res.headers.get('content-type'));
+      return res.text();
+    })
+    .then((txt) => console.log('[main] fetch worker.js length', txt.length))
+    .catch((err) => console.error('[main] fetch worker.js failed', err));
+
+  // ========== Worker起動 ==========
+  const off = hiddenCanvas.transferControlToOffscreen();  // three.js はこのOffscreenCanvasに描く
+  const workerUrl = './worker.js?' +  String(Date.now());
+  console.log('[main] new Worker', workerUrl);
+  let worker;
+  try {
+    worker = new Worker(workerUrl, { type: 'module' });
+  } catch (err) {
+    console.error('[main] new Worker threw', err);
+    log('[main] new Worker threw', err.message || err);
+    throw err;
+  }
+
+  // 初期化メッセージ：とりあえずデフォルト解像度で立ち上げ
+  worker.postMessage({ type:'init', canvas: off }, [off]);
+
+  // 受信ハンドラ（プレビュー画像・進捗・完了）
+  const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
+  worker.onmessage = (ev) => {
+    console.log('[main] worker message', ev.data);
+    const { type } = ev.data;
+    if (type === 'preview') {
+      // 1フレームプレビュー：ImageBitmapを受け取り2Dに描画
+      const bmp = ev.data.bitmap;
+      drawPreview(bmp, { t: ev.data.timeSec, w: ev.data.width, h: ev.data.height });
+      bmp.close();
+    } else if (type === 'progress') {
+      log(`Frame ${ev.data.done}/${ev.data.total}`);
+    } else if (type === 'done') {
+      // 完成Blob URLを受け取る
+      const { url, sizeBytes } = ev.data;
+      dl.href = url;
+      dl.style.display = 'inline-block';
+      log(`Done. ${Math.round(sizeBytes/1024/1024*10)/10} MB`);
+      btnRender.disabled = false;
+    } else if (type === 'log') {
+      log(ev.data.message);
+    } else if (type === 'error') {
+      log('ERROR:', ev.data.message);
+      btnRender.disabled = false;
+    }
+  };
+  worker.addEventListener('error', (ev) => {
+    console.error('[main] worker error', ev);
+    log('[main] worker error', ev instanceof ErrorEvent
+      ? `ErrorEvent message=${ev.message} file=${ev.filename}:${ev.lineno}:${ev.colno}`
+      : `Event props: ${Object.getOwnPropertyNames(ev).map((k) => `${k}=${ev[k]}`).join(', ')}`);
+  });
+  worker.addEventListener('messageerror', (ev) => {
+    console.error('[main] worker messageerror', ev);
+    log('[main] worker messageerror');
+  });
+
+  // ========== プレビュー描画（HUD文字オーバレイ） ==========
+  function drawPreview(bmp, meta){
+    // アスペクトフィット（letterbox）
+    const dstW = previewCanvas.width, dstH = previewCanvas.height;
+    const srcW = bmp.width, srcH = bmp.height;
+    const s = Math.min(dstW/srcW, dstH/srcH);
+    const w = Math.round(srcW*s), h = Math.round(srcH*s);
+    const x = Math.floor((dstW - w)/2), y = Math.floor((dstH - h)/2);
+
+    previewCtx.save();
+    previewCtx.clearRect(0,0,dstW,dstH);
+    previewCtx.globalCompositeOperation = 'copy';
+    previewCtx.drawImage(bmp, x, y, w, h);
+    previewCtx.globalCompositeOperation = 'source-over';
+
+    // HUD：時刻と解像度
+    previewCtx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    previewCtx.textBaseline = 'bottom';
+    previewCtx.fillStyle = 'rgba(0,0,0,.6)';
+    previewCtx.fillRect(6, dstH-24, 240, 18);
+    previewCtx.fillStyle = '#fff';
+    previewCtx.fillText(`t=${meta.t.toFixed(3)}s  (${meta.w}x${meta.h})`, 10, dstH-10);
+    previewCtx.restore();
+
+    try {
+      const center = previewCtx.getImageData(Math.floor(dstW/2), Math.floor(dstH/2), 1, 1).data;
+      console.log('[main] preview center pixel', Array.from(center));
+      log(`[main] preview center pixel ${Array.from(center).join(',')}`);
+    } catch (err) {
+      console.error('[main] getImageData failed', err);
+    }
+  }
+
+  // ========== UIイベント ==========
+  // 1フレームだけプレビュー
+  btnPreview.onclick = () => {
+    const width = +wEl.value|0, height = +hEl.value|0;
+    const fps = Math.max(1, +fpsEl.value);
+    const tSec = Math.max(0, +pvSecEl.value);
+    const durationSec = Math.max(0.1, +secEl.value);
+
+    // 解像度変更があればWorkerに伝える（OffscreenCanvasはサイズ可変）
+    worker.postMessage({ type:'resize', width, height });
+
+    // 指定秒の1フレームだけ描いてImageBitmapを返してもらう
+    worker.postMessage({ type:'preview', timeSec: Math.min(tSec, durationSec), fps });
+  };
+
+  // フルレンダリング開始
+  btnRender.onclick = () => {
+    btnRender.disabled = true;
+    dl.style.display = 'none';
+    previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+    chunks.length = 0;
+    logEl.textContent = '';
+
+    const width = +wEl.value|0, height = +hEl.value|0;
+    const sec = Math.max(0.1, +secEl.value);
+    const fps = Math.max(1, +fpsEl.value);
+    const total = Math.round(sec * fps);
+    const gopSec = Math.max(0.5, +gopSecEl.value);
+    const mbps = Math.max(1, +mbpsEl.value);
+
+    worker.postMessage({ type:'resize', width, height });
+
+    // WebCodecs + WebM muxerでオフライン1フレームずつエンコード
+    worker.postMessage({
+      type:'render',
+      totalFrames: total,
+      fps,
+      bitrate: Math.round(mbps * 1_000_000),  // Mbps → bps
+      keyframeIntervalSec: gopSec
+    });
+  };
+</script>
