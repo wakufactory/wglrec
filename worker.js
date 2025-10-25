@@ -17,8 +17,10 @@ console.log('[worker] script evaluated top-level');
 let canvas;             // OffscreenCanvas（メインからtransfer）
 let width = 1280, height = 720;
 let renderer;           // THREE.WebGLRenderer
-let scene, camera, clock;
+let sceneController = null;
+let renderFrame = null;
 let ready = false;
+let sceneModuleUrl = './scene-default.js';
 
 // ====== エンコード関連 ======
 let encoder = null;
@@ -46,7 +48,7 @@ self.onmessage = async (ev) => {
     if (msg.type === 'init') {
       canvas = msg.canvas;
       width = canvas.width; height = canvas.height;
-      await initThree();
+      await initScene(msg.sceneModule);
       ready = true;
       log('Worker initialized.');
     } else if (msg.type === 'resize') {
@@ -56,10 +58,10 @@ self.onmessage = async (ev) => {
         canvas.width = width;
         canvas.height = height;
       }
-      if (renderer) {
+      if (sceneController?.resize) {
+        sceneController.resize(width, height);
+      } else if (renderer) {
         renderer.setSize(width, height, false);
-        camera.aspect = width / height;
-        camera.updateProjectionMatrix();
       }
     } else if (msg.type === 'preview') {
       // 指定時刻（秒）の1フレームを描いて ImageBitmap を送る
@@ -81,6 +83,19 @@ self.onmessage = async (ev) => {
       const blob = new Blob([webmBuffer], { type: 'video/webm' });
       const url = URL.createObjectURL(blob);
       postMessage({ type:'done', url, sizeBytes: blob.size });
+    } else if (msg.type === 'loadScene') {
+      ensureReady();
+      const modulePath = typeof msg.module === 'string' ? msg.module : null;
+      const previewTime = typeof msg.timeSec === 'number' ? msg.timeSec : 0;
+      log(`Scene reload requested => ${modulePath || sceneModuleUrl}`);
+      await initScene(modulePath);
+      if (sceneController?.resize) {
+        sceneController.resize(width, height);
+      } else if (renderer) {
+        renderer.setSize(width, height, false);
+      }
+      await renderAtTime(previewTime);
+      await emitPreview(previewTime, { origin: 'scene-reload' });
     }
   } catch (e) {
     postMessage({ type:'error', message: e?.stack || String(e) });
@@ -88,76 +103,61 @@ self.onmessage = async (ev) => {
 };
 
 // ====== three.js 初期化 ======
-async function initThree(){
-  // OffscreenCanvas を用いて WebGL 上下文を取得（antialiasは任意）
-  const gl = canvas.getContext('webgl2', { antialias: true, preserveDrawingBuffer: true, alpha: false });
-  if (!gl) throw new Error('WebGL2 context not available');
+async function initScene(modulePath){
+  const targetUrl = typeof modulePath === 'string' && modulePath.length > 0
+    ? modulePath
+    : sceneModuleUrl;
+  const resolvedUrl = targetUrl || './scene-default.js';
 
-  renderer = new THREE.WebGLRenderer({
-    canvas,
-    context: gl,
-    antialias: true,
-    preserveDrawingBuffer: true,  // プレビューの ImageBitmap 取得を安定させる
-    alpha: false
-  });
-  renderer.setSize(width, height, false);
-  renderer.setPixelRatio(1);       // 動画向け：1固定で安定化
-  renderer.setClearColor(scene?.background || 0x000000, 1);
-
-  // シーン例：重めのフラグメント処理の代わりに、簡易オブジェクト群＆ポストなし
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
-
-  camera = new THREE.PerspectiveCamera(45, width/height, 0.1, 100);
-  camera.position.set(0, 1.0, 3.5);
-
-  // 簡単なオブジェクト：回転トーラス＆床グリッド
-  const geo = new THREE.TorusKnotGeometry(0.7, 0.28, 256, 48);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x66ccff, metalness: 0.2, roughness: 0.3 });
-  const torus = new THREE.Mesh(geo, mat);
-  torus.name = 'torus';
-  scene.add(torus);
-
-  const grid = new THREE.GridHelper(8, 16, 0x444444, 0x222222);
-  grid.position.y = -1.0;
-  scene.add(grid);
-
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.0);
-  scene.add(hemi);
-
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(3, 4, 2);
-  scene.add(dir);
-
-  clock = new THREE.Clock(false); // 自動進行は使わない（決定的にtimeを渡す）
-
-  // 決定的進行のために、任意時刻 t を明示的に渡す draw を用意
-  drawScene(0);
-}
-
-// t（秒）に基づいて「同じ結果」を描く（乱数は固定化推奨）
-function drawScene(tSec){
-  // 例：時間でアニメする（トーラス回転＋色相バイアス）
-  const torus = scene.getObjectByName('torus');
-  if (torus){
-    torus.rotation.x = tSec * 0.9;
-    torus.rotation.y = tSec * 1.2;
-    const hue = (tSec * 0.05) % 1.0;
-    const color = new THREE.Color().setHSL(hue, 0.6, 0.55);
-    torus.material.color.copy(color);
+  try {
+    sceneController?.dispose?.();
+  } catch (err) {
+    log(`Scene dispose failed: ${err?.message || err}`);
   }
-  camera.lookAt(0,0,0);
-  renderer.render(scene, camera);
+  try {
+    renderer?.dispose?.();
+  } catch (err) {
+    log(`Renderer dispose failed: ${err?.message || err}`);
+  }
+  sceneController = null;
+  renderer = null;
+  renderFrame = null;
+
+  const mod = await import(resolvedUrl);
+  const factory = typeof mod.createSceneController === 'function'
+    ? mod.createSceneController
+    : typeof mod.default === 'function'
+      ? mod.default
+      : null;
+  if (typeof factory !== 'function') {
+    throw new Error(`Scene module ${resolvedUrl} must export createSceneController()`);
+  }
+
+  const controller = await factory({ THREE, canvas, width, height });
+  if (!controller?.renderer || typeof controller.renderFrame !== 'function') {
+    throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
+  }
+
+  sceneController = controller;
+  sceneModuleUrl = resolvedUrl;
+  renderer = controller.renderer;
+  renderFrame = controller.renderFrame.bind(controller);
 }
 
 // 任意時刻 t（秒）で1フレームだけ描画
 async function renderAtTime(tSec){
-  drawScene(tSec);
+  if (typeof renderFrame !== 'function') {
+    throw new Error('Scene render function not configured');
+  }
+  renderFrame(tSec);
   await waitForGpu();
 }
 
 // ====== オフライン 1フレームずつ → WebCodecs へ投入 ======
 async function renderAndEncode(totalFrames){
+  if (typeof renderFrame !== 'function') {
+    throw new Error('Scene render function not configured');
+  }
   // 1) WebM muxer 準備（VP9想定）
   muxTarget = new ArrayBufferTarget();
   muxer = new Muxer({
@@ -203,7 +203,7 @@ async function renderAndEncode(totalFrames){
   const timePerFrameUs = Math.round(1_000_000 / fps);
   for (let i=0; i<totalFrames; i++){
     const t = i / fps;          // 決定的な理想時刻
-    drawScene(t);               // three.js を t 秒でレンダ
+    renderFrame(t);             // three.js を t 秒でレンダ
     await waitForGpu();
     if (i === 0) debugSample('render-loop');
     debugSample(`frame ${i}`);

@@ -13,7 +13,7 @@
   a#dl { display:none; }
 </style>
 
-<h1>Three.js オフラインレンダリング（1フレームプレビュー付き）</h1>
+<h1>Three.js オフラインレンダリング</h1>
 
 <fieldset>
   <legend>レンダリング設定</legend>
@@ -23,6 +23,12 @@
   <label>FPS <input id="fps" type="number" value="30" step="1" min="1"></label>
   <label>Keyframe every(s) <input id="gopSec" type="number" value="2" step="0.5" min="0.5"></label>
   <label>Bitrate(Mbps) <input id="mbps" type="number" value="6" step="0.5" min="1"></label>
+</fieldset>
+
+<fieldset>
+  <legend>シーンモジュール</legend>
+  <label>Module URL <input id="sceneModule" type="text" value="./scene-default.js" style="min-width:260px;"></label>
+  <button id="btnReloadScene">シーン再読み込み</button>
 </fieldset>
 
 <fieldset>
@@ -74,10 +80,18 @@
   const btnRender = document.getElementById('btnRender');
   const dl = document.getElementById('dl');
   const logEl = document.getElementById('log');
+  const sceneModuleEl = document.getElementById('sceneModule');
+  const btnReloadScene = document.getElementById('btnReloadScene');
   function log(...args){
     console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
     logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function getSceneModuleValue(){
+    const raw = sceneModuleEl?.value ?? '';
+    const trimmed = raw.trim();
+    return trimmed || './scene-default.js';
   }
 
   console.log('[main] script loaded');
@@ -103,7 +117,11 @@
   }
 
   // 初期化メッセージ：とりあえずデフォルト解像度で立ち上げ
-  worker.postMessage({ type:'init', canvas: off }, [off]);
+  const initialSceneModule = getSceneModuleValue();
+  if (sceneModuleEl) {
+    sceneModuleEl.value = initialSceneModule;
+  }
+  worker.postMessage({ type:'init', sceneModule: initialSceneModule, canvas: off }, [off]);
 
   // 受信ハンドラ（プレビュー画像・進捗・完了）
   const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
@@ -263,6 +281,28 @@
     ensurePreviewWithinBounds();
     queuePreview(true);
   };
+
+  if (btnReloadScene) {
+    btnReloadScene.addEventListener('click', () => {
+      if (!worker) {
+        log('[main] worker not ready');
+        return;
+      }
+      const previewTime = ensurePreviewWithinBounds();
+      const modulePath = getSceneModuleValue();
+      log(`[main] reload scene module => ${modulePath}`);
+      worker.postMessage({ type:'loadScene', module: modulePath, timeSec: previewTime });
+    });
+  }
+
+  if (sceneModuleEl) {
+    sceneModuleEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        btnReloadScene?.click();
+      }
+    });
+  }
 
   // 初期化：スライダー範囲とラベル
   ensurePreviewWithinBounds();
