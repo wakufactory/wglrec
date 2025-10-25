@@ -2,7 +2,7 @@
 <meta charset="utf-8" />
 <title>Three.js Frame-by-Frame Encoder (WebCodecs + Worker)</title>
 <style>
-  body { font: 14px/1.6 system-ui; margin: 24px; }
+  body { font: 14px/1.6 system-ui; margin: 24px; color:white; background-color: #222; }
   fieldset { border:1px solid #ddd; padding:12px; margin-bottom:12px; }
   label { margin-right: 12px; display:inline-flex; align-items:center; gap:6px; }
   input[type=number] { width: 6em; }
@@ -94,6 +94,25 @@
     return trimmed || './scene-default.js';
   }
 
+  function deriveExportFilename(modulePath){
+    if (typeof modulePath !== 'string' || !modulePath.trim()) {
+      return 'render.webm';
+    }
+    let target = modulePath.trim();
+    try {
+      const url = new URL(target, window.location.href);
+      target = url.pathname || target;
+    } catch (_) {
+      // Skip URL normalization when modulePath is relative
+    }
+    target = target.split(/[?#]/)[0];
+    const segments = target.split('/').filter(Boolean);
+    const last = segments.pop() || target;
+    const base = last.replace(/\.[^.]+$/, '') || 'render';
+    const safeBase = base.replace(/[^\w.-]+/g, '_') || 'render';
+    return `${safeBase}.webm`;
+  }
+
   console.log('[main] script loaded');
   fetch('./worker.js?' + String(Date.now()))
     .then((res) => {
@@ -118,6 +137,7 @@
 
   // 初期化メッセージ：とりあえずデフォルト解像度で立ち上げ
   const initialSceneModule = getSceneModuleValue();
+  let currentSceneModule = initialSceneModule;
   if (sceneModuleEl) {
     sceneModuleEl.value = initialSceneModule;
   }
@@ -145,7 +165,10 @@
     } else if (type === 'done') {
       // 完成Blob URLを受け取る
       const { url, sizeBytes } = ev.data;
+      const exportName = deriveExportFilename(currentSceneModule || getSceneModuleValue());
       dl.href = url;
+      dl.download = exportName;
+      dl.textContent = `Download ${exportName}`;
       dl.style.display = 'inline-block';
       log(`Done. ${Math.round(sizeBytes/1024/1024*10)/10} MB`);
       btnRender.disabled = false;
@@ -291,6 +314,7 @@
       const previewTime = ensurePreviewWithinBounds();
       const modulePath = getSceneModuleValue();
       log(`[main] reload scene module => ${modulePath}`);
+      currentSceneModule = modulePath;
       worker.postMessage({ type:'loadScene', module: modulePath, timeSec: previewTime });
     });
   }
@@ -321,6 +345,7 @@
     const total = Math.round(sec * fps);
     const gopSec = Math.max(0.5, +gopSecEl.value);
     const mbps = Math.max(1, +mbpsEl.value);
+    currentSceneModule = getSceneModuleValue();
 
     worker.postMessage({ type:'resize', width, height });
 
