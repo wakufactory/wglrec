@@ -41,6 +41,23 @@ const log = (m) => {
   postMessage({ type:'log', message: String(m) });
 };
 
+function createCacheBustedModuleUrl(baseUrl) {
+  // Append a short-lived token so module re-imports bypass the browser cache.
+  const source = (baseUrl || '').trim();
+  if (!source) {
+    throw new Error('Scene module URL must be a non-empty string');
+  }
+  const token = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const absolute = new URL(source, self.location?.href || self.location);
+    absolute.searchParams.set('cacheBust', token);
+    return absolute.href;
+  } catch (err) {
+    const delimiter = source.includes('?') ? '&' : '?';
+    return `${source}${delimiter}cacheBust=${token}`;
+  }
+}
+
 // ====== メッセージ受付 ======
 self.onmessage = async (ev) => {
   const msg = ev.data;
@@ -107,7 +124,7 @@ async function initScene(modulePath){
   const targetUrl = typeof modulePath === 'string' && modulePath.length > 0
     ? modulePath
     : sceneModuleUrl;
-  const resolvedUrl = targetUrl || './scene-default.js';
+  const resolvedUrl = (targetUrl || './scene-default.js').trim() || './scene-default.js';
 
   try {
     sceneController?.dispose?.();
@@ -123,7 +140,8 @@ async function initScene(modulePath){
   renderer = null;
   renderFrame = null;
 
-  const mod = await import(resolvedUrl);
+  const bustUrl = createCacheBustedModuleUrl(resolvedUrl);
+  const mod = await import(bustUrl);
   const factory = typeof mod.createSceneController === 'function'
     ? mod.createSceneController
     : typeof mod.default === 'function'
