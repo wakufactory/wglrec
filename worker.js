@@ -37,7 +37,7 @@ let previewPixelBuffer = null;
 
 // ====== 汎用ログ ======
 const log = (m) => {
-  console.log('[worker]', m);
+//  console.log('[worker]', m);
   postMessage({ type:'log', message: String(m) });
 };
 
@@ -53,7 +53,7 @@ self.onmessage = async (ev) => {
       log('Worker initialized.');
     } else if (msg.type === 'resize') {
       width = msg.width|0; height = msg.height|0;
-      log(`Resize received => ${width}x${height}`);
+ //     log(`Resize received => ${width}x${height}`);
       if (canvas) {
         canvas.width = width;
         canvas.height = height;
@@ -71,7 +71,7 @@ self.onmessage = async (ev) => {
       log(`Preview request t=${t.toFixed(3)} fps=${fps} size=${width}x${height}`);
       colorSpace = msg.colorSpace || 'srgb';
       await renderAtTime(t);
-      await emitPreview(t, { debug: true, origin: 'ui' });
+      await emitPreview(t, { debug: false, origin: 'ui' });
     } else if (msg.type === 'render') {
       ensureReady();
       const totalFrames = +msg.totalFrames|0;
@@ -256,6 +256,7 @@ async function waitForGpu(){
 }
 
 function debugSample(tag){
+    return ;
   if (debugSampleCount++ > 8) return;
   if (!renderer) return;
   const gl = renderer.getContext();

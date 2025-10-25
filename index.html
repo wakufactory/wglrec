@@ -114,13 +114,6 @@
   }
 
   console.log('[main] script loaded');
-  fetch('./worker.js?' + String(Date.now()))
-    .then((res) => {
-      console.log('[main] fetch worker.js status', res.status, res.headers.get('content-type'));
-      return res.text();
-    })
-    .then((txt) => console.log('[main] fetch worker.js length', txt.length))
-    .catch((err) => console.error('[main] fetch worker.js failed', err));
 
   // ========== Worker起動 ==========
   const off = hiddenCanvas.transferControlToOffscreen();  // three.js はこのOffscreenCanvasに描く
@@ -146,7 +139,7 @@
   // 受信ハンドラ（プレビュー画像・進捗・完了）
   const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
   worker.onmessage = (ev) => {
-    if (ev.data?.type !== 'preview') {
+    if (0 && ev.data?.type !== 'preview') {
       console.log('[main] worker message', ev.data);
     }
     const { type } = ev.data;
@@ -214,7 +207,7 @@
     previewCtx.fillText(`t=${meta.t.toFixed(3)}s  (${meta.w}x${meta.h})`, 10, dstH-10);
     previewCtx.restore();
 
-    if (meta.origin !== 'render') {
+    if (0 && meta.origin !== 'render') {
       try {
         const center = previewCtx.getImageData(Math.floor(dstW/2), Math.floor(dstH/2), 1, 1).data;
         console.log('[main] preview center pixel', Array.from(center));
