@@ -8,7 +8,7 @@
  * いずれも ESM を import します（Module Worker）。
  * ブラウザは Chrome 系の最新を想定（WebCodecs / OffscreenCanvas）。
  * ================================================== */
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.module.js';
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/webm-muxer@3.2.1/build/webm-muxer.mjs';
 
 console.log('[worker] script evaluated top-level');
