@@ -69,25 +69,7 @@ self.onmessage = async (ev) => {
       log(`Preview request t=${t.toFixed(3)} fps=${fps} size=${width}x${height}`);
       colorSpace = msg.colorSpace || 'srgb';
       await renderAtTime(t);
-      debugSample('preview');
-      const bmp = await captureBitmap();
-      log(`Preview bitmap size = ${bmp.width}x${bmp.height}`);
-      try {
-        const testCanvas = new OffscreenCanvas(1, 1);
-        const testCtx = testCanvas.getContext('2d');
-        if (!testCtx) {
-          log('[debug:bitmap] no 2d context available');
-        }
-        log(`[debug:bitmap] bitmap colorSpace=${bmp.colorSpace}`);
-        const sx = Math.max(0, Math.min(bmp.width - 1, Math.floor(bmp.width / 2)));
-        const sy = Math.max(0, Math.min(bmp.height - 1, Math.floor(bmp.height / 2)));
-        testCtx.drawImage(bmp, sx, sy, 1, 1, 0, 0, 1, 1);
-        const pixel = testCtx.getImageData(0, 0, 1, 1).data;
-        log(`[debug:bitmap] center pixel = [${pixel.join(', ')}]`);
-      } catch (err) {
-        log(`[debug:bitmap] sample failed: ${err?.message || err}`);
-      }
-      postMessage({ type:'preview', bitmap: bmp, timeSec: t, width, height }, [bmp]);
+      await emitPreview(t, { debug: true, origin: 'ui' });
     } else if (msg.type === 'render') {
       ensureReady();
       const totalFrames = +msg.totalFrames|0;
@@ -225,6 +207,7 @@ async function renderAndEncode(totalFrames){
     await waitForGpu();
     if (i === 0) debugSample('render-loop');
     debugSample(`frame ${i}`);
+    await emitPreview(t, { origin: 'render' });
 
     // VideoFrame へ（OffscreenCanvas からゼロコピー的に作れる）
     const ts = i * timePerFrameUs; // us
@@ -316,4 +299,28 @@ async function captureBitmap(){
   }
   previewCtx2D.putImageData(imageData, 0, 0);
   return await createImageBitmap(previewCanvas2D);
+}
+
+async function emitPreview(timeSec, { debug = false, origin = 'render' } = {}){
+  if (!renderer) return;
+  const bmp = await captureBitmap();
+  if (debug) {
+    log(`Preview bitmap size = ${bmp.width}x${bmp.height}`);
+    try {
+      const testCanvas = new OffscreenCanvas(1, 1);
+      const testCtx = testCanvas.getContext('2d');
+      if (!testCtx) {
+        log('[debug:bitmap] no 2d context available');
+      }
+      log(`[debug:bitmap] bitmap colorSpace=${bmp.colorSpace}`);
+      const sx = Math.max(0, Math.min(bmp.width - 1, Math.floor(bmp.width / 2)));
+      const sy = Math.max(0, Math.min(bmp.height - 1, Math.floor(bmp.height / 2)));
+      testCtx.drawImage(bmp, sx, sy, 1, 1, 0, 0, 1, 1);
+      const pixel = testCtx.getImageData(0, 0, 1, 1).data;
+      log(`[debug:bitmap] center pixel = [${pixel.join(', ')}]`);
+    } catch (err) {
+      log(`[debug:bitmap] sample failed: ${err?.message || err}`);
+    }
+  }
+  postMessage({ type:'preview', bitmap: bmp, timeSec, width, height, origin }, [bmp]);
 }

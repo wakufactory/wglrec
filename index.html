@@ -33,8 +33,12 @@
     <!-- プレビュー表示用（メインスレッドで描くだけの2D） -->
     <div>
       <canvas id="preview" width="640" height="360"></canvas>
-      <div style="margin-top:8px;">
-        <label>Preview at t = <input id="pvSec" type="number" value="0.0" step="0.033" min="0"></label> sec
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+        <label style="display:flex;align-items:center;gap:10px;">
+          <span>プレビュー時刻</span>
+          <input id="pvSec" type="range" value="0" min="0" max="5" step="0.033" style="flex:1 1 auto;">
+          <span><span id="pvSecLabel">0.00</span> sec</span>
+        </label>
         <button id="btnPreview">1フレームプレビュー</button>
       </div>
       <div style="opacity:.8;font-size:12px;">※ プレビューはレンダリング結果のスナップショットです（動画品質には影響しません）</div>
@@ -64,6 +68,7 @@
   const previewCtx = previewCanvas.getContext('2d');
 
   const pvSecEl = document.getElementById('pvSec');
+  const pvSecLabelEl = document.getElementById('pvSecLabel');
   const btnPreview = document.getElementById('btnPreview');
 
   const btnRender = document.getElementById('btnRender');
@@ -103,12 +108,19 @@
   // 受信ハンドラ（プレビュー画像・進捗・完了）
   const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
   worker.onmessage = (ev) => {
-    console.log('[main] worker message', ev.data);
+    if (ev.data?.type !== 'preview') {
+      console.log('[main] worker message', ev.data);
+    }
     const { type } = ev.data;
     if (type === 'preview') {
       // 1フレームプレビュー：ImageBitmapを受け取り2Dに描画
       const bmp = ev.data.bitmap;
-      drawPreview(bmp, { t: ev.data.timeSec, w: ev.data.width, h: ev.data.height });
+      drawPreview(bmp, {
+        t: ev.data.timeSec,
+        w: ev.data.width,
+        h: ev.data.height,
+        origin: ev.data.origin || 'ui'
+      });
       bmp.close();
     } else if (type === 'progress') {
       log(`Frame ${ev.data.done}/${ev.data.total}`);
@@ -161,29 +173,99 @@
     previewCtx.fillText(`t=${meta.t.toFixed(3)}s  (${meta.w}x${meta.h})`, 10, dstH-10);
     previewCtx.restore();
 
-    try {
-      const center = previewCtx.getImageData(Math.floor(dstW/2), Math.floor(dstH/2), 1, 1).data;
-      console.log('[main] preview center pixel', Array.from(center));
-      log(`[main] preview center pixel ${Array.from(center).join(',')}`);
-    } catch (err) {
-      console.error('[main] getImageData failed', err);
+    if (meta.origin !== 'render') {
+      try {
+        const center = previewCtx.getImageData(Math.floor(dstW/2), Math.floor(dstH/2), 1, 1).data;
+        console.log('[main] preview center pixel', Array.from(center));
+        log(`[main] preview center pixel ${Array.from(center).join(',')}`);
+      } catch (err) {
+        console.error('[main] getImageData failed', err);
+      }
     }
   }
 
   // ========== UIイベント ==========
-  // 1フレームだけプレビュー
-  btnPreview.onclick = () => {
+  const PREVIEW_DEBOUNCE_MS = 120;
+  let previewDebounceHandle = 0;
+
+  function updatePreviewLabel(){
+    if (!pvSecLabelEl) return;
+    const durationSec = Math.max(0.1, +secEl.value);
+    const value = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
+    pvSecLabelEl.textContent = value.toFixed(2);
+  }
+
+  function ensurePreviewWithinBounds(){
+    const durationSec = Math.max(0.1, +secEl.value);
+    const fps = Math.max(1, +fpsEl.value);
+    pvSecEl.max = String(durationSec);
+    pvSecEl.step = String(Math.max(0.001, 1 / fps));
+    const clamped = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
+    if (Number.isNaN(clamped)) {
+      pvSecEl.value = '0';
+    } else if (clamped !== +pvSecEl.value) {
+      pvSecEl.value = String(clamped);
+    }
+    updatePreviewLabel();
+    return clamped;
+  }
+
+  function queuePreview(immediate = false){
+    if (previewDebounceHandle) {
+      clearTimeout(previewDebounceHandle);
+      previewDebounceHandle = 0;
+    }
+    if (immediate) {
+      sendPreviewRequest();
+    } else {
+      previewDebounceHandle = setTimeout(() => {
+        previewDebounceHandle = 0;
+        sendPreviewRequest();
+      }, PREVIEW_DEBOUNCE_MS);
+    }
+  }
+
+  function sendPreviewRequest(){
     const width = +wEl.value|0, height = +hEl.value|0;
     const fps = Math.max(1, +fpsEl.value);
-    const tSec = Math.max(0, +pvSecEl.value);
     const durationSec = Math.max(0.1, +secEl.value);
+    const current = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
+    pvSecEl.value = String(current);
+    updatePreviewLabel();
 
-    // 解像度変更があればWorkerに伝える（OffscreenCanvasはサイズ可変）
     worker.postMessage({ type:'resize', width, height });
+    worker.postMessage({ type:'preview', timeSec: current, fps });
+  }
 
-    // 指定秒の1フレームだけ描いてImageBitmapを返してもらう
-    worker.postMessage({ type:'preview', timeSec: Math.min(tSec, durationSec), fps });
+  pvSecEl.addEventListener('input', () => {
+    ensurePreviewWithinBounds();
+    queuePreview();
+  });
+  pvSecEl.addEventListener('change', () => {
+    ensurePreviewWithinBounds();
+    queuePreview(true);
+  });
+
+  secEl.addEventListener('input', () => {
+    const before = +pvSecEl.value || 0;
+    const after = ensurePreviewWithinBounds();
+    if (after !== before) {
+      queuePreview(true);
+    }
+  });
+  fpsEl.addEventListener('input', () => {
+    ensurePreviewWithinBounds();
+    queuePreview(true);
+  });
+
+  // 1フレームだけプレビュー
+  btnPreview.onclick = () => {
+    ensurePreviewWithinBounds();
+    queuePreview(true);
   };
+
+  // 初期化：スライダー範囲とラベル
+  ensurePreviewWithinBounds();
 
   // フルレンダリング開始
   btnRender.onclick = () => {
