@@ -1,7 +1,8 @@
 // shader-template.js
 // Provide a minimal full-screen shader scene matching the default scene interface.
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 
-export async function createSceneController({ THREE, canvas, width, height }) {
+export async function createSceneController({ canvas, width, height }) {
   // Initialize shared WebGL2 renderer resources
   const gl = canvas.getContext('webgl2', {
     antialias: true,

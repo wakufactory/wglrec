@@ -1,7 +1,8 @@
 // scene-default.js
 // Export a reusable Three.js scene setup that the worker can swap out.
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 
-export async function createSceneController({ THREE, canvas, width, height }) {
+export async function createSceneController({ canvas, width, height }) {
   // Acquire WebGL2 context and configure renderer
   const gl = canvas.getContext('webgl2', {
     antialias: true,

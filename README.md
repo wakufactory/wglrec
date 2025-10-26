@@ -1,6 +1,6 @@
 # wglrec
 
-Three.js のシーンを Web Worker 上でオフラインレンダリングし、WebCodecs と WebM Muxer を使って VP9 の WebM 動画として書き出すデモです。メインスレッドは UI とプレビュー描画のみを担当し、OffscreenCanvas を Worker に移譲して決定的なフレーム生成を行います。
+Three.js など任意のシーンモジュールを Web Worker 上でオフラインレンダリングし、WebCodecs と WebM Muxer を使って VP9 の WebM 動画として書き出すデモです。メインスレッドは UI とプレビュー描画のみを担当し、OffscreenCanvas を Worker に移譲して決定的なフレーム生成を行います。
 
 ## 機能概要
 - 解像度・尺・FPS・ビットレート・キーフレーム間隔を指定してレンダリングを実行し、WebM (VP9) を生成。
@@ -10,26 +10,26 @@ Three.js のシーンを Web Worker 上でオフラインレンダリングし�
 
 ## 動作要件
 - WebCodecs と OffscreenCanvas に対応した最新の Chromium 系ブラウザ。
-- CDN から three.js (r159+) と `webm-muxer` を読み込める環境。
+- CDN からシーンが必要とするライブラリ（例: three.js r159+）と `webm-muxer` を読み込める環境。
 - モジュールワーカーが利用可能であること。
 
 ## シーンモジュールの作成方法
-シーンは ES Modules として実装し、`createSceneController`（または default export）を提供します。ワーカーはこのファクトリ関数から得られるコントローラを通じて Three.js のレンダー処理を呼び出します。
+シーンは ES Modules として実装し、`createSceneController`（または default export）を提供します。ワーカーはこのファクトリ関数から得られるコントローラを通じてレンダー処理を呼び出します。Three.js 等のライブラリはシーン側で `import` してください。
 
 ### 必須インターフェース
 ```ts
 export async function createSceneController({
-  THREE,    // CDN から読み込んだ three.js モジュール
   canvas,   // transferControlToOffscreen() 済みの OffscreenCanvas
   width,    // 初期幅
   height    // 初期高さ
 }) {
-  // ... Three.js 初期化 ...
+  // ... Three.js や 2D コンテキストなどの初期化 ...
   return {
-    renderer,                 // THREE.WebGLRenderer のインスタンス
+    renderer,                 // optional: レンダラー（例: THREE.WebGLRenderer）
     renderFrame: (tSec) => {},// 時刻 tSec (秒) で1フレーム描画
     resize?: (w, h) => {},    // optional: サイズ変更時の処理
-    dispose?: () => {}        // optional: 後始末
+    dispose?: () => {},       // optional: 後始末
+    captureBitmap?: () => {}  // optional: ImageBitmap 取得のカスタム処理
   };
 }
 ```
@@ -37,10 +37,17 @@ export async function createSceneController({
 - `renderFrame(tSec)` はレンダリングループから毎フレーム呼び出されます。`tSec` は 0 から開始する実時間（秒）です。
 - `resize(w, h)` を実装すると、UI で解像度を変更した際に呼び出されます。カメラのアスペクト更新や `renderer.setSize` を行ってください。
 - `dispose()` を実装すると、新しいシーンを読み込む前に呼び出され、リソースの破棄ができます。
+- `captureBitmap()` を実装すると、プレビューや進捗通知の際に独自のイメージ取得ロジックを利用できます。未実装の場合は `createImageBitmap(canvas)` にフォールバックします。
 
 ### テンプレート
 - `scene-default.js` : Three.js の標準ジオメトリとライトを使った基本シーン。
+- `scene1.js` : Three.js のアニメーション例。
 - `shader-template.js` : フルスクリーンクアッドとカスタムシェーダーで最小構成を示すテンプレート。
+- `shader-path.js` : フルスクリーンパストレーシングの例。
+- `scene-canvas.js` : 2D Canvas API だけで実装した軽量サンプル。
+- `scene-p5.js` : p5.js をインポートして OffscreenCanvas 上で描画するサンプル。
+
+`scene-canvas.js` と `scene-p5.js` はいずれも WebGL に依存せず、OffscreenCanvas の 2D コンテキストを活用する例です。`scene-p5.js` では Worker 環境で p5.js を動かすための簡易 DOM スタブを内部で構築しています。
 
 どちらも `createSceneController` を実装しているので、新しいシーンを作成する際の参考になります。
 

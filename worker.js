@@ -1,26 +1,26 @@
 // worker.js (module worker)
-// three.js を OffscreenCanvas 上で駆動し、フレーム毎に WebCodecs へ投入。
+// OffscreenCanvas 上でシーンモジュールを駆動し、フレーム毎に WebCodecs へ投入。
 // 任意秒の1フレームプレビューは ImageBitmap をメインへ転送。
 
 /* ===================== 依存CDN =====================
- * three.js:           r159 以降を想定
- * webm-muxer:         https://github.com/Vanilagy/webm-muxer
+ * webm-muxer: https://github.com/Vanilagy/webm-muxer
  * いずれも ESM を import します（Module Worker）。
  * ブラウザは Chrome 系の最新を想定（WebCodecs / OffscreenCanvas）。
  * ================================================== */
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/webm-muxer@3.2.1/build/webm-muxer.mjs';
 
 console.log('[worker] script evaluated top-level');
 
 // ====== レンダリング関連の状態 ======
-let canvas;             // OffscreenCanvas（メインからtransfer）
+let canvas;             // OffscreenCanvas（レンダー用）
+let initialCanvas = null; // メインから受け取った初期キャンバス（fallback用）
 let width = 1280, height = 720;
-let renderer;           // THREE.WebGLRenderer
+let renderer = null;    // 任意のレンダラー（例: THREE.WebGLRenderer）
 let sceneController = null;
 let renderFrame = null;
 let ready = false;
 let sceneModuleUrl = './scene-default.js';
+let renderContext = null; // WebGLRenderingContext | WebGL2RenderingContext | null
 
 // ====== エンコード関連 ======
 let encoder = null;
@@ -31,9 +31,6 @@ let keyframeIntervalSec = 2;
 let bitrate = 6_000_000;
 let debugSampleCount = 0;
 let colorSpace = 'srgb';
-let previewCanvas2D = null;
-let previewCtx2D = null;
-let previewPixelBuffer = null;
 
 // ====== 汎用ログ ======
 const log = (m) => {
@@ -63,7 +60,8 @@ self.onmessage = async (ev) => {
   const msg = ev.data;
   try {
     if (msg.type === 'init') {
-      canvas = msg.canvas;
+      initialCanvas = msg.canvas;
+      canvas = initialCanvas;
       width = canvas.width; height = canvas.height;
       await initScene(msg.sceneModule);
       ready = true;
@@ -119,26 +117,22 @@ self.onmessage = async (ev) => {
   }
 };
 
-// ====== three.js 初期化 ======
+// ====== シーン初期化 ======
 async function initScene(modulePath){
   const targetUrl = typeof modulePath === 'string' && modulePath.length > 0
     ? modulePath
     : sceneModuleUrl;
   const resolvedUrl = (targetUrl || './scene-default.js').trim() || './scene-default.js';
 
-  try {
-    sceneController?.dispose?.();
-  } catch (err) {
-    log(`Scene dispose failed: ${err?.message || err}`);
+  destroyCurrentScene();
+
+  const canvasSetup = createRenderingCanvas(width, height);
+  canvas = canvasSetup.surface;
+  width = canvasSetup.width;
+  height = canvasSetup.height;
+  if (!canvasSetup.reusedInitial) {
+    initialCanvas = canvas;
   }
-  try {
-    renderer?.dispose?.();
-  } catch (err) {
-    log(`Renderer dispose failed: ${err?.message || err}`);
-  }
-  sceneController = null;
-  renderer = null;
-  renderFrame = null;
 
   const bustUrl = createCacheBustedModuleUrl(resolvedUrl);
   const mod = await import(bustUrl);
@@ -151,15 +145,19 @@ async function initScene(modulePath){
     throw new Error(`Scene module ${resolvedUrl} must export createSceneController()`);
   }
 
-  const controller = await factory({ THREE, canvas, width, height });
-  if (!controller?.renderer || typeof controller.renderFrame !== 'function') {
+  const controller = await factory({ canvas, width, height });
+  if (!controller || typeof controller.renderFrame !== 'function') {
     throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
   }
 
   sceneController = controller;
   sceneModuleUrl = resolvedUrl;
-  renderer = controller.renderer;
+  renderer = controller.renderer ?? null;
   renderFrame = controller.renderFrame.bind(controller);
+  renderContext = resolveRenderContext(controller);
+  if (!renderer && typeof controller.resize !== 'function') {
+    log(`Scene ${resolvedUrl} does not provide renderer.resize; resize fallback unavailable.`);
+  }
 }
 
 // 任意時刻 t（秒）で1フレームだけ描画
@@ -221,7 +219,7 @@ async function renderAndEncode(totalFrames){
   const timePerFrameUs = Math.round(1_000_000 / fps);
   for (let i=0; i<totalFrames; i++){
     const t = i / fps;          // 決定的な理想時刻
-    renderFrame(t);             // three.js を t 秒でレンダ
+    renderFrame(t);             // シーンを t 秒でレンダ
     await waitForGpu();
     if (i === 0) debugSample('render-loop');
     debugSample(`frame ${i}`);
@@ -255,8 +253,7 @@ async function renderAndEncode(totalFrames){
 function nap(ms){ return new Promise(r => setTimeout(r, ms)); }
 function ensureReady(){ if (!ready) throw new Error('Worker not initialized'); }
 async function waitForGpu(){
-  if (!renderer) return;
-  const gl = renderer.getContext();
+  const gl = await getRenderableContext();
   if (!gl) return;
   if (typeof gl.fenceSync !== 'function') {
     gl.finish?.();
@@ -276,8 +273,7 @@ async function waitForGpu(){
 function debugSample(tag){
     return ;
   if (debugSampleCount++ > 8) return;
-  if (!renderer) return;
-  const gl = renderer.getContext();
+  const gl = renderContext;
   if (!gl?.readPixels) return;
   const x = Math.max(0, Math.min(width - 1, Math.floor(width / 2)));
   const y = Math.max(0, Math.min(height - 1, Math.floor(height / 2)));
@@ -291,37 +287,17 @@ function debugSample(tag){
 }
 
 async function captureBitmap(){
-  if (!renderer) throw new Error('Renderer not ready');
-  const gl = renderer.getContext();
-  if (!gl) throw new Error('WebGL context missing');
-  if (!previewCanvas2D || previewCanvas2D.width !== width || previewCanvas2D.height !== height){
-    previewCanvas2D = new OffscreenCanvas(width, height);
-    previewCtx2D = previewCanvas2D.getContext('2d');
-    previewPixelBuffer = null;
+  if (!canvas) {
+    throw new Error('Canvas not configured');
   }
-  if (!previewCtx2D) throw new Error('2D context unavailable for preview');
-
-  const size = width * height * 4;
-  if (!previewPixelBuffer || previewPixelBuffer.length !== size){
-    previewPixelBuffer = new Uint8Array(size);
+  if (typeof sceneController?.captureBitmap === 'function') {
+    const bmp = await sceneController.captureBitmap({ width, height, canvas });
+    if (bmp) return bmp;
   }
-
-  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, previewPixelBuffer);
-
-  const imageData = previewCtx2D.createImageData(width, height);
-  const dst = imageData.data;
-  const rowSize = width * 4;
-  for (let y = 0; y < height; y++){
-    const srcOffset = (height - 1 - y) * rowSize;
-    const dstOffset = y * rowSize;
-    dst.set(previewPixelBuffer.subarray(srcOffset, srcOffset + rowSize), dstOffset);
-  }
-  previewCtx2D.putImageData(imageData, 0, 0);
-  return await createImageBitmap(previewCanvas2D);
+  return await createImageBitmap(canvas);
 }
 
 async function emitPreview(timeSec, { debug = false, origin = 'render' } = {}){
-  if (!renderer) return;
   const bmp = await captureBitmap();
   if (debug) {
     log(`Preview bitmap size = ${bmp.width}x${bmp.height}`);
@@ -342,4 +318,130 @@ async function emitPreview(timeSec, { debug = false, origin = 'render' } = {}){
     }
   }
   postMessage({ type:'preview', bitmap: bmp, timeSec, width, height, origin }, [bmp]);
+}
+
+function resolveRenderContext(controller){
+  try {
+    if (!controller) return null;
+    if (controller.renderContext) return controller.renderContext;
+    if (controller.gl) return controller.gl;
+    if (controller.context && typeof controller.context.getParameter === 'function') {
+      return controller.context;
+    }
+    if (controller.renderer?.getContext) {
+      return controller.renderer.getContext();
+    }
+    const candidate = typeof controller.getRenderContext === 'function'
+      ? controller.getRenderContext()
+      : null;
+    if (candidate && typeof candidate.then === 'function') {
+      candidate.then((ctx) => {
+        if (ctx && typeof ctx.getParameter === 'function') {
+          renderContext = ctx;
+        }
+      }).catch((err) => {
+        log(`resolveRenderContext (async) failed: ${err?.message || err}`);
+      });
+      return null;
+    }
+    if (candidate && typeof candidate.getParameter === 'function') {
+      return candidate;
+    }
+    return null;
+  } catch (err) {
+    log(`resolveRenderContext: ${err?.message || err}`);
+    return null;
+  }
+}
+
+async function getRenderableContext(){
+  if (renderContext) return renderContext;
+  const ctx = resolveRenderContext(sceneController);
+  if (ctx) {
+    renderContext = ctx;
+    return renderContext;
+  }
+  return renderContext;
+}
+
+function destroyCurrentScene(){
+  const prevController = sceneController;
+  const prevRenderer = renderer;
+  const prevContext = renderContext;
+
+  sceneController = null;
+  renderFrame = null;
+  renderer = null;
+  renderContext = null;
+
+  try {
+    prevController?.dispose?.();
+  } catch (err) {
+    log(`Scene dispose failed: ${err?.message || err}`);
+  }
+  try {
+    prevRenderer?.dispose?.();
+  } catch (err) {
+    log(`Renderer dispose failed: ${err?.message || err}`);
+  }
+  try {
+    prevRenderer?.forceContextLoss?.();
+  } catch (err) {
+    log(`Renderer forceContextLoss failed: ${err?.message || err}`);
+  }
+  releaseWebGLContext(prevContext);
+}
+
+function createRenderingCanvas(targetWidth, targetHeight){
+  const desiredWidth = clampDimension(targetWidth);
+  const desiredHeight = clampDimension(targetHeight);
+
+  if (typeof OffscreenCanvas === 'function') {
+    try {
+      const surface = new OffscreenCanvas(desiredWidth, desiredHeight);
+      surface.width = desiredWidth;
+      surface.height = desiredHeight;
+      return {
+        surface,
+        width: surface.width,
+        height: surface.height,
+        reusedInitial: false
+      };
+    } catch (err) {
+      log(`OffscreenCanvas allocation failed (${err?.message || err}), falling back to initial canvas.`);
+    }
+  }
+
+  if (initialCanvas) {
+    initialCanvas.width = desiredWidth;
+    initialCanvas.height = desiredHeight;
+    return {
+      surface: initialCanvas,
+      width: initialCanvas.width,
+      height: initialCanvas.height,
+      reusedInitial: true
+    };
+  }
+
+  throw new Error('Rendering canvas allocation failed: OffscreenCanvas unavailable');
+}
+
+function releaseWebGLContext(gl){
+  if (!gl || typeof gl.getExtension !== 'function') return;
+  try {
+    const lose =
+      gl.getExtension('WEBGL_lose_context') ||
+      gl.getExtension('WEBKIT_WEBGL_lose_context');
+    if (lose && typeof lose.loseContext === 'function') {
+      lose.loseContext();
+    }
+  } catch (err) {
+    log(`releaseWebGLContext failed: ${err?.message || err}`);
+  }
+}
+
+function clampDimension(value){
+  const num = Number.isFinite(value) ? value : 1;
+  const clamped = Math.max(1, num);
+  return Math.floor(clamped);
 }
