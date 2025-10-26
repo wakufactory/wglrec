@@ -13,7 +13,7 @@
   a#dl { display:none; }
 </style>
 
-<h1>CANVAS offline render</h1>
+<h1>CANVAS offscreen renderer</h1>
 
 <fieldset>
   <legend>render settings</legend>
@@ -27,7 +27,7 @@
 
 <fieldset>
   <legend>scene module</legend>
-  <label>Module URL <input id="sceneModule" type="text" value="./scene-default.js" style="min-width:260px;"></label>
+  <label>Module URL <input id="sceneModule" type="text" value="" style="min-width:260px;"></label>
   <button id="btnReloadScene">import</button>
 </fieldset>
 
@@ -90,7 +90,7 @@
   function getSceneModuleValue(){
     const raw = sceneModuleEl?.value ?? '';
     const trimmed = raw.trim();
-    return trimmed || './scene-default.js';
+    return trimmed || location.search.substring(1) || './scene-default.js';
   }
 
   function deriveExportFilename(modulePath){
@@ -112,8 +112,6 @@
     return `${safeBase}.webm`;
   }
 
-  console.log('[main] script loaded');
-
   // ========== Worker起動 ==========
   const off = hiddenCanvas.transferControlToOffscreen();  // three.js はこのOffscreenCanvasに描く
   const workerUrl = './worker.js?' +  String(Date.now());
@@ -134,6 +132,7 @@
     sceneModuleEl.value = initialSceneModule;
   }
   worker.postMessage({ type:'init', sceneModule: initialSceneModule, canvas: off }, [off]);
+  setTimeout(()=>{worker.postMessage({ type:'loadScene', module: initialSceneModule, timeSec: 0 })},500);
 
   // 受信ハンドラ（プレビュー画像・進捗・完了）
   const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
