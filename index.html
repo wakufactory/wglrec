@@ -53,7 +53,7 @@
 
 <fieldset>
   <legend>export</legend>
-  <button id="btnRender">start（WebM outout）</button>
+  <button id="btnRender">start render（WebM outout）</button>
   <button id="btnCancelRender" disabled>cancel render</button>
   <a id="dl" download="render.webm">Download render.webm</a>
 </fieldset>
@@ -282,10 +282,6 @@
   }
 
   pvSecEl.addEventListener('input', () => {
-    ensurePreviewWithinBounds();
-    queuePreview();
-  });
-  pvSecEl.addEventListener('change', () => {
     ensurePreviewWithinBounds();
     queuePreview(true);
   });
