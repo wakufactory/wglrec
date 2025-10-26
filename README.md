@@ -45,9 +45,8 @@ export async function createSceneController({
 - `shader-template.js` : フルスクリーンクアッドとカスタムシェーダーで最小構成を示すテンプレート。
 - `shader-path.js` : フルスクリーンパストレーシングの例。
 - `scene-canvas.js` : 2D Canvas API だけで実装した軽量サンプル。
-- `scene-p5.js` : p5.js をインポートして OffscreenCanvas 上で描画するサンプル。
 
-`scene-canvas.js` と `scene-p5.js` はいずれも WebGL に依存せず、OffscreenCanvas の 2D コンテキストを活用する例です。`scene-p5.js` では Worker 環境で p5.js を動かすための簡易 DOM スタブを内部で構築しています。
+`scene-canvas.js`  は WebGL に依存せず、OffscreenCanvas の 2D コンテキストを活用する例です。
 
 どちらも `createSceneController` を実装しているので、新しいシーンを作成する際の参考になります。
 
