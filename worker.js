@@ -216,7 +216,8 @@ async function initScene(modulePath){
     throw new Error(`Scene module ${resolvedUrl} must export createSceneController()`);
   }
 
-  const controller = await factory({ canvas, width, height });
+  const controllerLog = (msg) => log(`[scene] ${msg}`);
+  const controller = await factory({ canvas, width, height, log: controllerLog });
   if (typeof controller?.renderFrame !== 'function') {
     throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
   }
