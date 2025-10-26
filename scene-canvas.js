@@ -14,7 +14,7 @@ export async function createSceneController({ canvas, width, height }) {
   canvas.height = height;
   ctx.imageSmoothingEnabled = true;
 
-  function renderFrame(tSec) {
+  async function renderFrame(tSec) {
     const w = canvas.width;
     const h = canvas.height;
 
@@ -89,7 +89,7 @@ export async function createSceneController({ canvas, width, height }) {
     ctx.imageSmoothingEnabled = true;
   }
 
-  renderFrame(0);
+  await renderFrame(0);
 
   return {
     renderFrame,

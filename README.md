@@ -26,7 +26,7 @@ export async function createSceneController({
   // ... Three.js や 2D コンテキストなどの初期化 ...
   return {
     renderer,                 // optional: レンダラー（例: THREE.WebGLRenderer）
-    renderFrame: (tSec) => {},// 時刻 tSec (秒) で1フレーム描画
+    renderFrame: async (tSec) => {}, // 時刻 tSec (秒) で1フレーム描画（Promise可）
     resize?: (w, h) => {},    // optional: サイズ変更時の処理
     dispose?: () => {},       // optional: 後始末
     captureBitmap?: () => {}  // optional: ImageBitmap 取得のカスタム処理
@@ -34,7 +34,7 @@ export async function createSceneController({
 }
 ```
 
-- `renderFrame(tSec)` はレンダリングループから毎フレーム呼び出されます。`tSec` は 0 から開始する実時間（秒）です。
+- `renderFrame(tSec)` はレンダリングループから毎フレーム呼び出されます。`async` 関数として Promise を返して構いません（ワーカー側で await されます）。`tSec` は 0 から開始する実時間（秒）です。
 - `resize(w, h)` を実装すると、UI で解像度を変更した際に呼び出されます。カメラのアスペクト更新や `renderer.setSize` を行ってください。
 - `dispose()` を実装すると、新しいシーンを読み込む前に呼び出され、リソースの破棄ができます。
 - `captureBitmap()` を実装すると、プレビューや進捗通知の際に独自のイメージ取得ロジックを利用できます。未実装の場合は `createImageBitmap(canvas)` にフォールバックします。

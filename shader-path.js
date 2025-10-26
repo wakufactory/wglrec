@@ -280,7 +280,7 @@ export async function createSceneController({ canvas, width, height }) {
 
   scene.add(quad);
 
-  function renderFrame(tSec) {
+  async function renderFrame(tSec) {
     uniforms.uTime.value = tSec;
     renderer.render(scene, camera);
   }
@@ -290,7 +290,7 @@ export async function createSceneController({ canvas, width, height }) {
     uniforms.uResolution.value.set(nextWidth, nextHeight);
   }
 
-  renderFrame(0);
+  await renderFrame(0);
 
   return {
     renderer,

@@ -29,8 +29,6 @@ let muxTarget = null;           // ArrayBufferTarget（Output buffer）
 let fps = 30;
 let keyframeIntervalSec = 2;
 let bitrate = 6_000_000;
-let debugSampleCount = 0;
-let colorSpace = 'srgb';
 
 // ====== 汎用ログ ======
 const log = (m) => {
@@ -57,85 +55,122 @@ function createCacheBustedModuleUrl(baseUrl) {
 
 // ====== メッセージ受付 ======
 self.onmessage = async (ev) => {
-  const msg = ev.data;
   try {
-    if (msg.type === 'init') {
-      initialCanvas = msg.canvas;
-      canvas = initialCanvas;
-      width = canvas.width; height = canvas.height;
-      await initScene(msg.sceneModule);
-      ready = true;
-      log('Worker initialized.');
-    } else if (msg.type === 'resize') {
-      width = msg.width|0; height = msg.height|0;
- //     log(`Resize received => ${width}x${height}`);
-      if (canvas) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      if (sceneController?.resize) {
-        sceneController.resize(width, height);
-      } else if (renderer) {
-        renderer.setSize(width, height, false);
-      }
-    } else if (msg.type === 'preview') {
-      // 指定時刻（秒）の1フレームを描いて ImageBitmap を送る
-      ensureReady();
-      const t = Math.max(0, +msg.timeSec || 0);
-      fps = Math.max(1, +msg.fps || 30);
-      log(`Preview request t=${t.toFixed(3)} fps=${fps} size=${width}x${height}`);
-      colorSpace = msg.colorSpace || 'srgb';
-      await renderAtTime(t);
-      await emitPreview(t, { debug: false, origin: 'ui' });
-    } else if (msg.type === 'render') {
-      ensureReady();
-      const totalFrames = +msg.totalFrames|0;
-      fps = Math.max(1, +msg.fps || 30);
-      bitrate = Math.max(100_000, +msg.bitrate || 6_000_000);
-      keyframeIntervalSec = Math.max(0.5, +msg.keyframeIntervalSec || 2);
-      const webmBuffer = await renderAndEncode(totalFrames);
-      // Muxer 終了 → Blob URL を返す
-      const blob = new Blob([webmBuffer], { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      postMessage({ type:'done', url, sizeBytes: blob.size });
-    } else if (msg.type === 'loadScene') {
-      ensureReady();
-      const modulePath = typeof msg.module === 'string' ? msg.module : null;
-      const previewTime = typeof msg.timeSec === 'number' ? msg.timeSec : 0;
-      log(`Scene reload requested => ${modulePath || sceneModuleUrl}`);
-      await initScene(modulePath);
-      if (sceneController?.resize) {
-        sceneController.resize(width, height);
-      } else if (renderer) {
-        renderer.setSize(width, height, false);
-      }
-      await renderAtTime(previewTime);
-      await emitPreview(previewTime, { origin: 'scene-reload' });
+    const msg = ev.data ?? {};
+    switch (msg.type) {
+      case 'init':
+        await handleInit(msg);
+        break;
+      case 'resize':
+        handleResize(msg);
+        break;
+      case 'preview':
+        await handlePreview(msg);
+        break;
+      case 'render':
+        await handleRender(msg);
+        break;
+      case 'loadScene':
+        await handleLoadScene(msg);
+        break;
+      default:
+        if (msg.type) {
+          log(`Unknown message type: ${msg.type}`);
+        }
     }
   } catch (e) {
     postMessage({ type:'error', message: e?.stack || String(e) });
   }
 };
 
+async function handleInit({ canvas: initCanvas, sceneModule }) {
+  initialCanvas = initCanvas;
+  canvas = initialCanvas;
+  if (!canvas) {
+    throw new Error('Initialization requires a transferable canvas');
+  }
+  width = canvas.width;
+  height = canvas.height;
+  await initScene(sceneModule);
+  ready = true;
+  log('Worker initialized.');
+}
+
+function handleResize({ width: nextWidth, height: nextHeight }) {
+  applyResize(nextWidth, nextHeight);
+}
+
+async function handlePreview({ timeSec, fps: requestedFps }) {
+  ensureReady();
+  const t = Math.max(0, Number(timeSec) || 0);
+  fps = Math.max(1, Number(requestedFps) || 30);
+  log(`Preview request t=${t.toFixed(3)} fps=${fps} size=${width}x${height}`);
+  await renderAtTime(t);
+  await emitPreview(t, 'ui');
+}
+
+async function handleRender({ totalFrames, fps: requestedFps, bitrate: requestedBitrate, keyframeIntervalSec: requestedInterval }) {
+  ensureReady();
+  const frames = Math.max(0, Math.floor(Number(totalFrames) || 0));
+  fps = Math.max(1, Number(requestedFps) || 30);
+  bitrate = Math.max(100_000, Number(requestedBitrate) || 6_000_000);
+  keyframeIntervalSec = Math.max(0.5, Number(requestedInterval) || 2);
+  const webmBuffer = await renderAndEncode(frames);
+  const blob = new Blob([webmBuffer], { type: 'video/webm' });
+  const url = URL.createObjectURL(blob);
+  postMessage({ type:'done', url, sizeBytes: blob.size });
+}
+
+async function handleLoadScene({ module, timeSec }) {
+  ensureReady();
+  const modulePath = typeof module === 'string' ? module : null;
+  const previewTime = Math.max(0, Number(timeSec) || 0);
+  log(`Scene reload requested => ${modulePath || sceneModuleUrl}`);
+  await initScene(modulePath);
+  applyResize(width, height);
+  await renderAtTime(previewTime);
+  await emitPreview(previewTime, 'scene-reload');
+}
+
+function applyResize(nextWidth, nextHeight) {
+  const parsedWidth = Number(nextWidth);
+  const parsedHeight = Number(nextHeight);
+  width = clampDimension(Number.isFinite(parsedWidth) ? parsedWidth : width);
+  height = clampDimension(Number.isFinite(parsedHeight) ? parsedHeight : height);
+
+  if (canvas) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const resize = sceneController?.resize;
+  if (typeof resize === 'function') {
+    resize(width, height);
+    return;
+  }
+
+  renderer?.setSize?.(width, height, false);
+}
+
 // ====== シーン初期化 ======
 async function initScene(modulePath){
-  const targetUrl = typeof modulePath === 'string' && modulePath.length > 0
-    ? modulePath
-    : sceneModuleUrl;
-  const resolvedUrl = (targetUrl || './scene-default.js').trim() || './scene-default.js';
+  const resolvedUrl =
+    (typeof modulePath === 'string' && modulePath.trim()) ||
+    (sceneModuleUrl && sceneModuleUrl.trim()) ||
+    './scene-default.js';
 
   destroyCurrentScene();
 
-  const canvasSetup = createRenderingCanvas(width, height);
-  canvas = canvasSetup.surface;
-  width = canvasSetup.width;
-  height = canvasSetup.height;
-  if (!canvasSetup.reusedInitial) {
+  const { surface, width: surfaceWidth, height: surfaceHeight, reusedInitial } =
+    createRenderingCanvas(width, height);
+  canvas = surface;
+  width = surfaceWidth;
+  height = surfaceHeight;
+  if (!reusedInitial) {
     initialCanvas = canvas;
   }
 
-  const bustUrl = createCacheBustedModuleUrl(resolvedUrl);
-  const mod = await import(bustUrl);
+  const mod = await import(createCacheBustedModuleUrl(resolvedUrl));
   const factory = typeof mod.createSceneController === 'function'
     ? mod.createSceneController
     : typeof mod.default === 'function'
@@ -146,7 +181,7 @@ async function initScene(modulePath){
   }
 
   const controller = await factory({ canvas, width, height });
-  if (!controller || typeof controller.renderFrame !== 'function') {
+  if (typeof controller?.renderFrame !== 'function') {
     throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
   }
 
@@ -165,7 +200,7 @@ async function renderAtTime(tSec){
   if (typeof renderFrame !== 'function') {
     throw new Error('Scene render function not configured');
   }
-  renderFrame(tSec);
+  await renderFrame(tSec);
   await waitForGpu();
 }
 
@@ -219,11 +254,9 @@ async function renderAndEncode(totalFrames){
   const timePerFrameUs = Math.round(1_000_000 / fps);
   for (let i=0; i<totalFrames; i++){
     const t = i / fps;          // 決定的な理想時刻
-    renderFrame(t);             // シーンを t 秒でレンダ
+    await renderFrame(t);             // シーンを t 秒でレンダ
     await waitForGpu();
-    if (i === 0) debugSample('render-loop');
-    debugSample(`frame ${i}`);
-    await emitPreview(t, { origin: 'render' });
+    await emitPreview(t, 'render');
 
     // VideoFrame へ（OffscreenCanvas からゼロコピー的に作れる）
     const ts = i * timePerFrameUs; // us
@@ -250,7 +283,7 @@ async function renderAndEncode(totalFrames){
   return buffer;
 }
 
-function nap(ms){ return new Promise(r => setTimeout(r, ms)); }
+function nap(ms = 0){ return new Promise(r => setTimeout(r, ms)); }
 function ensureReady(){ if (!ready) throw new Error('Worker not initialized'); }
 async function waitForGpu(){
   const gl = await getRenderableContext();
@@ -270,22 +303,6 @@ async function waitForGpu(){
   gl.commit?.();
 }
 
-function debugSample(tag){
-    return ;
-  if (debugSampleCount++ > 8) return;
-  const gl = renderContext;
-  if (!gl?.readPixels) return;
-  const x = Math.max(0, Math.min(width - 1, Math.floor(width / 2)));
-  const y = Math.max(0, Math.min(height - 1, Math.floor(height / 2)));
-  const buf = new Uint8Array(4);
-  try {
-    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-    log(`[debug:${tag}] pixel(${x},${y}) = [${buf.join(', ')}]`);
-  } catch (err) {
-    log(`[debug:${tag}] readPixels failed: ${err?.message || err}`);
-  }
-}
-
 async function captureBitmap(){
   if (!canvas) {
     throw new Error('Canvas not configured');
@@ -297,46 +314,36 @@ async function captureBitmap(){
   return await createImageBitmap(canvas);
 }
 
-async function emitPreview(timeSec, { debug = false, origin = 'render' } = {}){
+async function emitPreview(timeSec, origin = 'render'){
   const bmp = await captureBitmap();
-  if (debug) {
-    log(`Preview bitmap size = ${bmp.width}x${bmp.height}`);
-    try {
-      const testCanvas = new OffscreenCanvas(1, 1);
-      const testCtx = testCanvas.getContext('2d');
-      if (!testCtx) {
-        log('[debug:bitmap] no 2d context available');
-      }
-      log(`[debug:bitmap] bitmap colorSpace=${bmp.colorSpace}`);
-      const sx = Math.max(0, Math.min(bmp.width - 1, Math.floor(bmp.width / 2)));
-      const sy = Math.max(0, Math.min(bmp.height - 1, Math.floor(bmp.height / 2)));
-      testCtx.drawImage(bmp, sx, sy, 1, 1, 0, 0, 1, 1);
-      const pixel = testCtx.getImageData(0, 0, 1, 1).data;
-      log(`[debug:bitmap] center pixel = [${pixel.join(', ')}]`);
-    } catch (err) {
-      log(`[debug:bitmap] sample failed: ${err?.message || err}`);
-    }
-  }
   postMessage({ type:'preview', bitmap: bmp, timeSec, width, height, origin }, [bmp]);
 }
 
 function resolveRenderContext(controller){
   try {
     if (!controller) return null;
-    if (controller.renderContext) return controller.renderContext;
-    if (controller.gl) return controller.gl;
-    if (controller.context && typeof controller.context.getParameter === 'function') {
-      return controller.context;
+
+    const candidates = [
+      controller.renderContext,
+      controller.gl,
+      typeof controller.context?.getParameter === 'function' ? controller.context : null,
+      typeof controller.renderer?.getContext === 'function' ? controller.renderer.getContext() : null
+    ];
+
+    for (const ctx of candidates) {
+      if (ctx?.getParameter) {
+        return ctx;
+      }
     }
-    if (controller.renderer?.getContext) {
-      return controller.renderer.getContext();
+
+    if (typeof controller.getRenderContext !== 'function') {
+      return null;
     }
-    const candidate = typeof controller.getRenderContext === 'function'
-      ? controller.getRenderContext()
-      : null;
-    if (candidate && typeof candidate.then === 'function') {
-      candidate.then((ctx) => {
-        if (ctx && typeof ctx.getParameter === 'function') {
+
+    const asyncCandidate = controller.getRenderContext();
+    if (asyncCandidate?.then) {
+      asyncCandidate.then((ctx) => {
+        if (ctx?.getParameter) {
           renderContext = ctx;
         }
       }).catch((err) => {
@@ -344,10 +351,8 @@ function resolveRenderContext(controller){
       });
       return null;
     }
-    if (candidate && typeof candidate.getParameter === 'function') {
-      return candidate;
-    }
-    return null;
+
+    return asyncCandidate?.getParameter ? asyncCandidate : null;
   } catch (err) {
     log(`resolveRenderContext: ${err?.message || err}`);
     return null;
@@ -355,11 +360,11 @@ function resolveRenderContext(controller){
 }
 
 async function getRenderableContext(){
-  if (renderContext) return renderContext;
-  const ctx = resolveRenderContext(sceneController);
-  if (ctx) {
-    renderContext = ctx;
-    return renderContext;
+  if (!renderContext) {
+    const ctx = resolveRenderContext(sceneController);
+    if (ctx) {
+      renderContext = ctx;
+    }
   }
   return renderContext;
 }

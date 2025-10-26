@@ -53,7 +53,7 @@ export async function createSceneController({ canvas, width, height }) {
 
   renderer.setClearColor(scene.background, 1);
 
-  function renderFrame(tSec) {
+  async function renderFrame(tSec) {
     const target = scene.getObjectByName('torus');
     if (target) {
       target.rotation.x = tSec * 0.9;
@@ -73,7 +73,7 @@ export async function createSceneController({ canvas, width, height }) {
   }
 
   // Draw once so downstream consumers can rely on an initialized frame.
-  renderFrame(0);
+  await renderFrame(0);
 
   return {
     renderer,
