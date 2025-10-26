@@ -41,7 +41,6 @@ export async function createSceneController({
 
 ### テンプレート
 - `scene-default.js` : Three.js の標準ジオメトリとライトを使った基本シーン。
-- `scene1.js` : Three.js のアニメーション例。
 - `shader-template.js` : フルスクリーンクアッドとカスタムシェーダーで最小構成を示すテンプレート。
 - `shader-path.js` : フルスクリーンパストレーシングの例。
 - `scene-canvas.js` : 2D Canvas API だけで実装した軽量サンプル。
