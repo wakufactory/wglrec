@@ -54,6 +54,7 @@
 <fieldset>
   <legend>export</legend>
   <button id="btnRender">start（WebM outout）</button>
+  <button id="btnCancelRender" disabled>cancel render</button>
   <a id="dl" download="render.webm">Download render.webm</a>
 </fieldset>
 
@@ -77,10 +78,12 @@
   const btnPreview = document.getElementById('btnPreview');
 
   const btnRender = document.getElementById('btnRender');
+  const btnCancelRender = document.getElementById('btnCancelRender');
   const dl = document.getElementById('dl');
   const logEl = document.getElementById('log');
   const sceneModuleEl = document.getElementById('sceneModule');
   const btnReloadScene = document.getElementById('btnReloadScene');
+  let renderInFlight = false;
   function log(...args){
     console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
@@ -163,11 +166,20 @@
       dl.style.display = 'inline-block';
       log(`Done. ${Math.round(sizeBytes/1024/1024*10)/10} MB`);
       btnRender.disabled = false;
+      btnCancelRender.disabled = true;
+      renderInFlight = false;
+    } else if (type === 'cancelled') {
+      log('Render cancelled.');
+      btnRender.disabled = false;
+      btnCancelRender.disabled = true;
+      renderInFlight = false;
     } else if (type === 'log') {
       log(ev.data.message);
     } else if (type === 'error') {
       log('ERROR:', ev.data.message);
       btnRender.disabled = false;
+      btnCancelRender.disabled = true;
+      renderInFlight = false;
     }
   };
   worker.addEventListener('error', (ev) => {
@@ -324,7 +336,13 @@
 
   // フルレンダリング開始
   btnRender.onclick = () => {
+    if (renderInFlight) {
+      log('[main] render already running');
+      return;
+    }
     btnRender.disabled = true;
+    btnCancelRender.disabled = false;
+    renderInFlight = true;
     dl.style.display = 'none';
     previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
     chunks.length = 0;
@@ -348,5 +366,19 @@
       bitrate: Math.round(mbps * 1_000_000),  // Mbps → bps
       keyframeIntervalSec: gopSec
     });
+  };
+
+  btnCancelRender.onclick = () => {
+    if (!worker) {
+      log('[main] worker not ready');
+      return;
+    }
+    if (!renderInFlight) {
+      log('[main] no active render to cancel');
+      return;
+    }
+    btnCancelRender.disabled = true;
+    worker.postMessage({ type:'cancelRender' });
+    log('[main] cancel requested');
   };
 </script>

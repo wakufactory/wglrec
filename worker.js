@@ -21,6 +21,8 @@ let renderFrame = null;
 let ready = false;
 let sceneModuleUrl = './scene-default.js';
 let renderContext = null; // WebGLRenderingContext | WebGL2RenderingContext | null
+let cancelRequested = false;
+let isRendering = false;
 
 // ====== エンコード関連 ======
 let encoder = null;
@@ -73,6 +75,9 @@ self.onmessage = async (ev) => {
       case 'loadScene':
         await handleLoadScene(msg);
         break;
+      case 'cancelRender':
+        handleCancelRender();
+        break;
       default:
         if (msg.type) {
           log(`Unknown message type: ${msg.type}`);
@@ -111,14 +116,36 @@ async function handlePreview({ timeSec, fps: requestedFps }) {
 
 async function handleRender({ totalFrames, fps: requestedFps, bitrate: requestedBitrate, keyframeIntervalSec: requestedInterval }) {
   ensureReady();
+  if (isRendering) {
+    log('Render request ignored: already rendering.');
+    return;
+  }
   const frames = Math.max(0, Math.floor(Number(totalFrames) || 0));
   fps = Math.max(1, Number(requestedFps) || 30);
   bitrate = Math.max(100_000, Number(requestedBitrate) || 6_000_000);
   keyframeIntervalSec = Math.max(0.5, Number(requestedInterval) || 2);
-  const webmBuffer = await renderAndEncode(frames);
-  const blob = new Blob([webmBuffer], { type: 'video/webm' });
-  const url = URL.createObjectURL(blob);
-  postMessage({ type:'done', url, sizeBytes: blob.size });
+  cancelRequested = false;
+  isRendering = true;
+  try {
+    const webmBuffer = await renderAndEncode(frames);
+    if (cancelRequested) {
+      postMessage({ type:'cancelled' });
+      return;
+    }
+    const blob = new Blob([webmBuffer], { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    postMessage({ type:'done', url, sizeBytes: blob.size });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      log('Render cancelled before completion.');
+      postMessage({ type:'cancelled' });
+      return;
+    }
+    throw err;
+  } finally {
+    cancelRequested = false;
+    isRendering = false;
+  }
 }
 
 async function handleLoadScene({ module, timeSec }) {
@@ -130,6 +157,15 @@ async function handleLoadScene({ module, timeSec }) {
   applyResize(width, height);
   await renderAtTime(previewTime);
   await emitPreview(previewTime, 'scene-reload');
+}
+
+function handleCancelRender() {
+  if (!isRendering) {
+    log('Cancel request ignored: no active render.');
+    return;
+  }
+  log('Cancel render requested.');
+  cancelRequested = true;
 }
 
 function applyResize(nextWidth, nextHeight) {
@@ -209,78 +245,117 @@ async function renderAndEncode(totalFrames){
   if (typeof renderFrame !== 'function') {
     throw new Error('Scene render function not configured');
   }
-  // 1) WebM muxer 準備（VP9想定）
-  muxTarget = new ArrayBufferTarget();
-  muxer = new Muxer({
-    fastStart: false,  // 後から blob で渡すので false でもOK
-    target: muxTarget,
-    video: {
-      codec: 'V_VP9',           // VP9
-      width, height,
-      frameRate: fps
+  const abortIfNeeded = () => {
+    if (cancelRequested) {
+      throw createAbortError();
     }
-  });
-
-  // 2) VideoEncoder 準備（VP9）
-  const config = {
-    codec: 'vp09.00.10.08',     // VP9 profile/level（環境に応じて fallback してもOK）
-    width, height,
-    bitrate,                     // bps
-    framerate: fps,
   };
-  const sup = await VideoEncoder.isConfigSupported(config);
-  if (!sup.supported) {
-    throw new Error('WebCodecs: encoder config not supported (VP9).');
-  }
 
-  encoder = new VideoEncoder({
-    output: (chunk, meta) => {
-      if (!muxer) {
-        chunk.close?.();
-        return;
+  try {
+    // 1) WebM muxer 準備（VP9想定）
+    muxTarget = new ArrayBufferTarget();
+    muxer = new Muxer({
+      fastStart: false,  // 後から blob で渡すので false でもOK
+      target: muxTarget,
+      video: {
+        codec: 'V_VP9',           // VP9
+        width, height,
+        frameRate: fps
       }
-      try {
-        // webm-muxer expects the EncodedVideoChunk instance
-        muxer.addVideoChunk(chunk, meta);
-      } finally {
-        chunk.close?.();
-      }
-    },
-    error: (e) => postMessage({ type:'error', message: String(e) })
-  });
-  encoder.configure(config);
+    });
 
-  // 3) ループ：各フレームを決定的に描画 → VideoFrame化 → encode
-  const timePerFrameUs = Math.round(1_000_000 / fps);
-  for (let i=0; i<totalFrames; i++){
-    const t = i / fps;          // 決定的な理想時刻
-    await renderFrame(t);             // シーンを t 秒でレンダ
-    await waitForGpu();
-    await emitPreview(t, 'render');
+    // 2) VideoEncoder 準備（VP9）
+    const config = {
+      codec: 'vp09.00.10.08',     // VP9 profile/level（環境に応じて fallback してもOK）
+      width, height,
+      bitrate,                     // bps
+      framerate: fps,
+    };
+    const sup = await VideoEncoder.isConfigSupported(config);
+    if (!sup.supported) {
+      throw new Error('WebCodecs: encoder config not supported (VP9).');
+    }
 
-    // VideoFrame へ（OffscreenCanvas からゼロコピー的に作れる）
-    const ts = i * timePerFrameUs; // us
-    const vf = new VideoFrame(canvas, { timestamp: ts });
-    const isKey = (i === 0) || (i % Math.round(keyframeIntervalSec * fps) === 0);
-    encoder.encode(vf, { keyFrame: isKey });
-    vf.close();
+    encoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        if (!muxer || cancelRequested) {
+          chunk.close?.();
+          return;
+        }
+        try {
+          // webm-muxer expects the EncodedVideoChunk instance
+          muxer.addVideoChunk(chunk, meta);
+        } finally {
+          chunk.close?.();
+        }
+      },
+      error: (e) => postMessage({ type:'error', message: String(e) })
+    });
+    encoder.configure(config);
+    abortIfNeeded();
 
-    // 進捗通知
-    postMessage({ type:'progress', done: i+1, total: totalFrames });
+    // 3) ループ：各フレームを決定的に描画 → VideoFrame化 → encode
+    const timePerFrameUs = Math.round(1_000_000 / fps);
+    const keyframeInterval = Math.max(1, Math.round(keyframeIntervalSec * fps));
+    for (let i = 0; i < totalFrames; i++) {
+      abortIfNeeded();
+      const t = i / fps;          // 決定的な理想時刻
+      await renderFrame(t);             // シーンを t 秒でレンダ
+      await waitForGpu();
+      abortIfNeeded();
+      await emitPreview(t, 'render');
+      abortIfNeeded();
 
-    // スレッドに譲る（UI/GCに優しい）
-    await nap(0);
+      // VideoFrame へ（OffscreenCanvas からゼロコピー的に作れる）
+      const ts = i * timePerFrameUs; // us
+      const vf = new VideoFrame(canvas, { timestamp: ts });
+      const isKey = (i === 0) || (i % keyframeInterval === 0);
+      encoder.encode(vf, { keyFrame: isKey });
+      vf.close();
+      abortIfNeeded();
+
+      // 進捗通知
+      postMessage({ type:'progress', done: i + 1, total: totalFrames });
+
+      // スレッドに譲る（UI/GCに優しい）
+      await nap(0);
+      abortIfNeeded();
+    }
+
+    // 4) 終了処理：flush → close → muxer finalize
+    await encoder.flush();
+    abortIfNeeded();
+    encoder.close();
+    encoder = null;
+    abortIfNeeded();
+    muxer?.finalize();
+    const buffer = muxTarget?.buffer ?? new ArrayBuffer(0);
+    muxer = null;
+    muxTarget = null;
+    return buffer;
+  } catch (err) {
+    resetEncodingPipeline();
+    throw err;
   }
+}
 
-  // 4) 終了処理：flush → close → muxer finalize
-  await encoder.flush();
-  encoder.close();
-  encoder = null;
-  muxer.finalize();
-  const buffer = muxTarget?.buffer ?? new ArrayBuffer(0);
+function createAbortError(){
+  try {
+    return new DOMException('Render cancelled', 'AbortError');
+  } catch (_) {
+    const err = new Error('Render cancelled');
+    err.name = 'AbortError';
+    return err;
+  }
+}
+
+function resetEncodingPipeline(){
+  if (encoder) {
+    try { encoder.close(); } catch (_) { /* ignore */ }
+    encoder = null;
+  }
   muxer = null;
   muxTarget = null;
-  return buffer;
 }
 
 function nap(ms = 0){ return new Promise(r => setTimeout(r, ms)); }
