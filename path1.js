@@ -2,6 +2,146 @@
 // Full-screen path tracing sample using Three.js with a fragment shader.
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 
+export async function createSceneController({ canvas, width, height, log }) {
+  const gl = canvas.getContext('webgl2', {
+    antialias: false,
+    preserveDrawingBuffer: true,
+    alpha: false
+  });
+  if (!gl) {
+    throw new Error('WebGL2 context not available');
+  }
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    context: gl,
+    antialias: false,
+    preserveDrawingBuffer: true,
+    alpha: false
+  });
+  renderer.setSize(width, height, false);
+  renderer.setPixelRatio(1);
+  renderer.autoClear = false;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const stereo = 0.5;
+
+  const uniforms = {
+    uTime: { value: 0 },
+    uResolution: { value: new THREE.Vector2(width, height) },
+    uCameraPos: { value: new THREE.Vector3(0.0, 0.5, 4.0) },
+    uCameraTarget: { value: new THREE.Vector3(0.0, -0.1, -1.0) },
+    uCameraUp: { value: new THREE.Vector3(0.0, 1.0, 0.0) },
+    uCameraFovY: { value: 45.0 },
+    uStereoEye: { value:0. }
+  };
+
+  const fragmentShader = [
+    fragmentShaderEnvironment,
+    fragmentShaderCommon,
+    fragmentShaderScene
+  ].join('\n');
+
+  let shaderMaterial;
+  try {
+    shaderMaterial = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = vec2(uv.x,uv.y);
+          gl_Position = vec4(position, 1.0);
+        }
+      `,
+      fragmentShader,
+      depthTest: false
+    });
+  } catch (err) {
+    log?.(`ShaderMaterial creation failed: ${err?.message || err}`);
+    throw err;
+  }
+
+  const quad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    shaderMaterial
+  );
+
+  scene.add(quad);
+
+  async function renderFrame(tSec) {
+    uniforms.uTime.value = tSec;
+    try {
+      if(stereo==0) 
+        renderer.render(scene, camera);
+      else {
+        const w = uniforms.uResolution.value.x/2 ;
+        const h = uniforms.uResolution.value.y ;
+        uniforms.uStereoEye.value = -stereo/2 ;
+        renderer.setViewport(0,0,w,h)   
+        renderer.render(scene, camera);
+        uniforms.uStereoEye.value = stereo/2 ;
+        renderer.setViewport(w,0,w,h)   
+        renderer.render(scene, camera);
+      }
+    } catch (err) {
+      log?.(`Shader render failed: ${err?.message || err}`);
+      const glContext = renderer?.getContext?.();
+      const glError = glContext?.getError?.();
+      if (glError && glContext && glError !== glContext.NO_ERROR) {
+        log?.(`WebGL error code: 0x${glError.toString(16)}`);
+      }
+      throw err;
+    }
+  }
+
+  function assignVec3Uniform(uniform, value) {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      const [x = uniform.value.x, y = uniform.value.y, z = uniform.value.z] = value;
+      uniform.value.set(x, y, z);
+      return;
+    }
+    if (value.isVector3 === true || value instanceof THREE.Vector3) {
+      uniform.value.copy(value);
+      return;
+    }
+    const {
+      x = uniform.value.x,
+      y = uniform.value.y,
+      z = uniform.value.z
+    } = value;
+    uniform.value.set(x, y, z);
+  }
+
+  function setCamera({
+    position,
+    target,
+    up,
+    fovY
+  } = {}) {
+    assignVec3Uniform(uniforms.uCameraPos, position);
+    assignVec3Uniform(uniforms.uCameraTarget, target);
+    assignVec3Uniform(uniforms.uCameraUp, up);
+    if (typeof fovY === 'number') {
+      uniforms.uCameraFovY.value = fovY;
+    }
+  }
+
+  function resize(nextWidth, nextHeight) {
+    renderer.setSize(nextWidth, nextHeight, false);
+    uniforms.uResolution.value.set(nextWidth, nextHeight);
+  }
+
+  await renderFrame(0);
+
+  return {
+    renderer,
+    renderFrame,
+    resize,
+    setCamera
+  };
+}
 //scene shader 
 const fragmentShaderEnvironment = /* glsl */`
         precision highp float;
@@ -10,6 +150,11 @@ const fragmentShaderEnvironment = /* glsl */`
         varying vec2 vUv;
         uniform float uTime;
         uniform vec2 uResolution;
+        uniform vec3 uCameraPos;
+        uniform vec3 uCameraTarget;
+        uniform vec3 uCameraUp;
+        uniform float uCameraFovY;
+        uniform float uStereoEye ;
 
         // シーン全体で共有する定数群
         const float PI = 3.141592653589793;
@@ -30,9 +175,9 @@ const fragmentShaderEnvironment = /* glsl */`
         vec3 environment(Ray ray) {
           // 簡易なグラデーション環境光
           float t = 0.5 * (ray.direction.y + 1.0);
-          vec3 top = vec3(0.5, 0.80, 1.25);
+          vec3 top = vec3(1.2, 1.20, 2.3);
           vec3 bottom = vec3(0.05, 0.07, 0.10);
-          return mix(bottom, top, clamp(t, 0.0, 1.0));
+          return mix(bottom, top, clamp(t, 0.0, 2.0));
         }
   `;
   const fragmentShaderScene = /* glsl */`
@@ -45,7 +190,7 @@ const fragmentShaderEnvironment = /* glsl */`
 
           tryGround(ray, hit);
 
-          float lightPulse = 2.65 + 0.35 * sin(uTime * 0.4);
+          float lightPulse = 0.65 ;
           vec3 lightEmission = vec3(14.0, 12.0, 9.0) * lightPulse;
 
           float time = uTime;
@@ -55,7 +200,7 @@ const fragmentShaderEnvironment = /* glsl */`
 
           trySphere(ray, centerA, 1.0, vec3(0.85, 0.3, 0.2), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT, hit);
           trySphere(ray, centerB, 0.8, vec3(0.15, 0.16, 0.5), vec3(0.0), vec3(0.95), 0.02, MATERIAL_MIRROR, hit);
-          trySphere(ray, centerC, 0.6, vec3(0.55, 0.6, 0.2), vec3(0.0), vec3(0.5, 0.5, 0.5), 0.7, MATERIAL_GLOSSY, hit);
+          trySphere(ray, centerC, 0.6, vec3(0.55, 0.5, 0.), vec3(0.0), vec3(1., 1., .2), 0.5, MATERIAL_GLOSSY, hit);
           vec3 boxMin = vec3(-0.6, -0.45, -0.4);
           vec3 boxMax = vec3(0.6, 0.45, 0.4);
           float boxSpin = time * 2.6;
@@ -76,41 +221,11 @@ const fragmentShaderEnvironment = /* glsl */`
           );
           mat4 boxTransform = translation * rotation;
           tryBoxTransformed(ray, boxMin, boxMax, boxTransform, vec3(0.25, 0.8, 0.3), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT, hit);
-          trySphere(ray, vec3(0.0, 3.5, 0.0), 0.1, vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT, hit);
+          trySphere(ray, vec3(0.0, 3.5, 0.0), 0.5, vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT, hit);
         }
   `;
 
-
-export async function createSceneController({ canvas, width, height, log }) {
-  const gl = canvas.getContext('webgl2', {
-    antialias: false,
-    preserveDrawingBuffer: true,
-    alpha: false
-  });
-  if (!gl) {
-    throw new Error('WebGL2 context not available');
-  }
-
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    context: gl,
-    antialias: false,
-    preserveDrawingBuffer: true,
-    alpha: false
-  });
-  renderer.setSize(width, height, false);
-  renderer.setPixelRatio(1);
-  renderer.autoClear = true;
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-  const uniforms = {
-    uTime: { value: 0 },
-    uResolution: { value: new THREE.Vector2(width, height) }
-  };
-
-    const fragmentShaderCommon = /* glsl */`
+  const fragmentShaderCommon = /* glsl */`
 
         struct HitInfo {
           float t;
@@ -148,40 +263,8 @@ export async function createSceneController({ canvas, width, height, log }) {
           }
           bitangent = cross(n, tangent);
         }
-        vec3 cosineSampleHemisphere(vec2 xi, vec3 normal) {
-          // コサイン加重サンプリングで半球方向に新しいレイを生成
-          float phi = 2.0 * PI * xi.x;
-          float cosTheta = sqrt(1.0 - xi.y);
-          float sinTheta = sqrt(xi.y);
-          vec3 tangent, bitangent;
-          orthonormalBasis(normal, tangent, bitangent);
-          vec3 localDir = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-          return normalize(
-            localDir.x * tangent +
-            localDir.y * bitangent +
-            localDir.z * normal
-          );
-        }
 
-        vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
-          // Phongローブに従って鏡面方向まわりをサンプリング
-          float cosTheta = pow(xi.x, 1.0 / (exponent + 1.0));
-          float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-          float phi = 2.0 * PI * xi.y;
-          vec3 tangent, bitangent;
-          orthonormalBasis(reflectDir, tangent, bitangent);
-          vec3 localDir = vec3(
-            sinTheta * cos(phi),
-            sinTheta * sin(phi),
-            cosTheta
-          );
-          return normalize(
-            localDir.x * tangent +
-            localDir.y * bitangent +
-            localDir.z * reflectDir
-          );
-        }
-
+        // 各オブジェクトとの交差判定
         void trySphere(
           Ray ray,
           vec3 center,
@@ -335,40 +418,75 @@ export async function createSceneController({ canvas, width, height, log }) {
           hit.roughness = 1.0;
           hit.material = MATERIAL_LAMBERT;
         }
+        
+        //反射方向を決める関数
+        vec3 cosineSampleHemisphere(vec2 xi, vec3 normal) {
+          // コサイン加重サンプリングで半球方向に新しいレイを生成
+          float phi = 2.0 * PI * xi.x;
+          float cosTheta = sqrt(1.0 - xi.y);
+          float sinTheta = sqrt(xi.y);
+          vec3 tangent, bitangent;
+          orthonormalBasis(normal, tangent, bitangent);
+          vec3 localDir = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+          return normalize(
+            localDir.x * tangent +
+            localDir.y * bitangent +
+            localDir.z * normal
+          );
+        }
 
-        void intersectScene(Ray ray, inout HitInfo hit);
+        vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
+          // Phongローブに従って鏡面方向まわりをサンプリング
+          float cosTheta = pow(xi.x, 1.0 / (exponent + 1.0));
+          float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+          float phi = 2.0 * PI * xi.y;
+          vec3 tangent, bitangent;
+          orthonormalBasis(reflectDir, tangent, bitangent);
+          vec3 localDir = vec3(
+            sinTheta * cos(phi),
+            sinTheta * sin(phi),
+            cosTheta
+          );
+          return normalize(
+            localDir.x * tangent +
+            localDir.y * bitangent +
+            localDir.z * reflectDir
+          );
+        }
 
+        void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 prototype
+        // rayをトレース
         vec3 traceRay(Ray ray, inout uint seed) {
           // パストレーシングで放射輝度を積算
           vec3 throughput = vec3(1.0);
           vec3 radiance = vec3(0.0);
-
+          //反射上限回数分のループ
           for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
             HitInfo hit;
             hit.t = 1e20;
             hit.material = MATERIAL_NONE;
             intersectScene(ray, hit);
 
-            if (hit.material == MATERIAL_NONE) {
-              radiance += throughput * environment(ray);
+            if (hit.material == MATERIAL_NONE) {  //物体にヒットしなかった場合
+              radiance += throughput * environment(ray);  //環境光を加える
               break;
             }
 
-            radiance += throughput * hit.emission;
-            if (hit.material == MATERIAL_LIGHT) {
+            radiance += throughput * hit.emission;  //自己発光
+            if (hit.material == MATERIAL_LIGHT) { //光源ならそこで打ち切り
               break;
             }
 
             vec3 origin = hit.position + hit.normal * 0.001;
-
-            if (hit.material == MATERIAL_MIRROR) {
-              ray = Ray(origin, reflect(ray.direction, hit.normal));
-              throughput *= hit.albedo;
-              continue;
-            }
-
             vec3 newDir;
 
+            //鏡面反射
+            if (hit.material == MATERIAL_MIRROR) {
+              newDir = reflect(ray.direction, hit.normal);  //反射方向は一意に定まる
+              throughput *= hit.albedo;
+            }
+
+            //GLOSSY
             if (hit.material == MATERIAL_GLOSSY) {
               float specIntensity = max(hit.specular.r, max(hit.specular.g, hit.specular.b));
               float diffIntensity = max(hit.albedo.r, max(hit.albedo.g, hit.albedo.b));
@@ -406,13 +524,15 @@ export async function createSceneController({ canvas, width, height, log }) {
                 }
                 throughput *= 1.0 / p;
               }
-            } else {
+            } 
+            //LAMBERT
+            if (hit.material == MATERIAL_LAMBERT) { 
               vec2 xi = rand2(seed);
               newDir = cosineSampleHemisphere(xi, hit.normal);
               throughput *= hit.albedo;
-
+              //russian roulette
               float p = max(hit.albedo.r, max(hit.albedo.g, hit.albedo.b));
-              if (bounce > 2) {
+              if (bounce > 2) { 
                 float rr = rand(seed);
                 if (rr > p) {
                   break;
@@ -428,27 +548,33 @@ export async function createSceneController({ canvas, width, height, log }) {
         }
 
         void main() {
-          // ピクセルごとに複数サンプルを集めて平均化
-          vec2 pixel = gl_FragCoord.xy;
-          vec2 ndc = (pixel / uResolution) * 2.0 - 1.0;
-          float aspect = uResolution.x / uResolution.y;
+          vec2 pixel = gl_FragCoord.xy ;
+          vec2 res = uResolution ;
+          float aspect = res.x / res.y;
+          vec3 camPos = uCameraPos;
+          vec3 target = uCameraTarget;
+          vec3 up = normalize(uCameraUp);        
+          if(uStereoEye != 0.) {
+            res.x /= 2. ;
+            if(uStereoEye > 0.) pixel -= vec2(res.x,0.) ;
+            aspect /= 2. ;
+            camPos = camPos + uStereoEye * normalize(cross(target - camPos,up)) ;
+          } 
+          vec2 ndc = (pixel / res) * 2.0 - 1.0;        
 
-          vec3 camPos = vec3(0.0, 0.1, 4.0);
-          vec3 target = vec3(0.0, -0.1, -1.0);
-          vec3 up = vec3(0.0, 1.0, 0.0);
           vec3 forward = normalize(target - camPos);
           vec3 right = normalize(cross(forward, up));
           vec3 camUp = cross(right, forward);
-          float tanHalfFov = tan(radians(45.0) * 0.5);
+          float tanHalfFov = tan(radians(uCameraFovY) * 0.5);
 
           uint baseSeed = uint(pixel.y) * 1973u + uint(pixel.x) * 9277u + 374761393u;
           baseSeed ^= uint(SPP) * 668265263u;
-
+          // ピクセルごとに複数サンプルを集めて平均化
           vec3 accum = vec3(0.0);
           for (int s = 0; s < SPP; ++s) {
             uint seed = baseSeed + uint(s) * 1597334677u;
             vec2 jitter = rand2(seed) - 0.5;
-            vec2 jittered = ndc + jitter / uResolution;
+            vec2 jittered = ndc + jitter / res;
             vec3 dir = normalize(
               forward +
               right * jittered.x * aspect * tanHalfFov +
@@ -465,63 +591,3 @@ export async function createSceneController({ canvas, width, height, log }) {
         }
   `;
 
-  const fragmentShader = [
-    fragmentShaderEnvironment,
-    fragmentShaderCommon,
-    fragmentShaderScene
-  ].join('\n');
-
-  let shaderMaterial;
-  try {
-    shaderMaterial = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position, 1.0);
-        }
-      `,
-      fragmentShader,
-      depthTest: false
-    });
-  } catch (err) {
-    log?.(`ShaderMaterial creation failed: ${err?.message || err}`);
-    throw err;
-  }
-
-  const quad = new THREE.Mesh(
-    new THREE.PlaneGeometry(2, 2),
-    shaderMaterial
-  );
-
-  scene.add(quad);
-
-  async function renderFrame(tSec) {
-    uniforms.uTime.value = tSec;
-    try {
-      renderer.render(scene, camera);
-    } catch (err) {
-      log?.(`Shader render failed: ${err?.message || err}`);
-      const glContext = renderer?.getContext?.();
-      const glError = glContext?.getError?.();
-      if (glError && glContext && glError !== glContext.NO_ERROR) {
-        log?.(`WebGL error code: 0x${glError.toString(16)}`);
-      }
-      throw err;
-    }
-  }
-
-  function resize(nextWidth, nextHeight) {
-    renderer.setSize(nextWidth, nextHeight, false);
-    uniforms.uResolution.value.set(nextWidth, nextHeight);
-  }
-
-  await renderFrame(0);
-
-  return {
-    renderer,
-    renderFrame,
-    resize
-  };
-}
