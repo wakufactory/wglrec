@@ -1,4 +1,15 @@
 #line 2 3
+
+//環境光の設定
+vec3 environment(Ray ray) {
+  // 簡易なグラデーション環境光
+  float t = 0.5 * (ray.direction.y + 1.0);
+  vec3 top = vec3(1.2, 1.2, 2.3);
+  vec3 bottom = vec3(0.05, 0.07, 0.10);
+  return mix(bottom, top, clamp(t, 0.0, 2.0));
+}
+
+//シーンのhit test 
 void intersectScene(Ray ray, inout HitInfo hit) {
   // シーン内のオブジェクトとの交差をすべてチェック
   hit.material = MATERIAL_NONE;

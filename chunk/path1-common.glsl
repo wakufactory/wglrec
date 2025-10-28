@@ -1,4 +1,23 @@
 #line 2 2
+
+in vec2 vUv;
+uniform float uTime;
+uniform vec2 uResolution;
+uniform vec3 uCameraPos;
+uniform vec3 uCameraTarget;
+uniform vec3 uCameraUp;
+uniform float uCameraFovY;
+uniform float uStereoEye;
+
+// シーン全体で共有する定数群
+const float PI = 3.141592653589793;
+const int MATERIAL_NONE = -1;
+const int MATERIAL_LAMBERT = 0;
+const int MATERIAL_MIRROR = 1;
+const int MATERIAL_LIGHT = 2;
+const int MATERIAL_GLOSSY = 3;
+
+// hit 
 struct HitInfo {
   float t;
   vec3 position;
@@ -8,6 +27,12 @@ struct HitInfo {
   vec3 specular;
   float roughness;
   int material;
+};
+
+// レイと交差情報を保持する構造体
+struct Ray {
+  vec3 origin;
+  vec3 direction;
 };
 
 uint hashUint(uint x) {
@@ -227,6 +252,7 @@ vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
   );
 }
 
+vec3 environment(Ray ray) ;   // 環境光 prototype
 void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 prototype
 
 // rayをトレース
@@ -328,6 +354,8 @@ void main() {
   vec3 camPos = uCameraPos;
   vec3 target = uCameraTarget;
   vec3 up = normalize(uCameraUp);
+
+  // for stereo render
   if (uStereoEye != 0.0) {
     res.x /= 2.0;
     if (uStereoEye > 0.0) pixel -= vec2(res.x, 0.0);
@@ -335,7 +363,6 @@ void main() {
     camPos = camPos + uStereoEye * normalize(cross(target - camPos, up));
   }
   vec2 ndc = (pixel / res) * 2.0 - 1.0;
-
   vec3 forward = normalize(target - camPos);
   vec3 right = normalize(cross(forward, up));
   vec3 camUp = cross(right, forward);
