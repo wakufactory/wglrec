@@ -2,7 +2,7 @@
 // Full-screen path tracing sample using Three.js with a fragment shader.
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 
-export async function createSceneController({ canvas, width, height }) {
+export async function createSceneController({ canvas, width, height, log }) {
   const gl = canvas.getContext('webgl2', {
     antialias: false,
     preserveDrawingBuffer: true,
@@ -31,9 +31,9 @@ export async function createSceneController({ canvas, width, height }) {
     uResolution: { value: new THREE.Vector2(width, height) }
   };
 
-  const quad = new THREE.Mesh(
-    new THREE.PlaneGeometry(2, 2),
-    new THREE.ShaderMaterial({
+  let shaderMaterial;
+  try {
+    shaderMaterial = new THREE.ShaderMaterial({
       uniforms,
       vertexShader: `
         varying vec2 vUv;
@@ -50,6 +50,7 @@ export async function createSceneController({ canvas, width, height }) {
         uniform float uTime;
         uniform vec2 uResolution;
 
+        // シーン全体で共有する定数群
         const float PI = 3.141592653589793;
         const int MATERIAL_NONE = -1;
         const int MATERIAL_LAMBERT = 0;
@@ -58,6 +59,7 @@ export async function createSceneController({ canvas, width, height }) {
         const int MAX_BOUNCES = 6;
         const int SPP = 20; // samples per pixel
 
+        // レイと交差情報を保持する構造体
         struct Ray {
           vec3 origin;
           vec3 direction;
@@ -100,6 +102,7 @@ export async function createSceneController({ canvas, width, height }) {
         }
 
         vec3 cosineSampleHemisphere(vec2 xi, vec3 normal) {
+          // コサイン加重サンプリングで半球方向に新しいレイを生成
           float phi = 2.0 * PI * xi.x;
           float cosTheta = sqrt(1.0 - xi.y);
           float sinTheta = sqrt(xi.y);
@@ -114,6 +117,7 @@ export async function createSceneController({ canvas, width, height }) {
         }
 
         vec3 environment(Ray ray) {
+          // 簡易なグラデーション環境光
           float t = 0.5 * (ray.direction.y + 1.0);
           vec3 top = vec3(0.65, 0.80, 1.25);
           vec3 bottom = vec3(0.05, 0.07, 0.10);
@@ -129,6 +133,7 @@ export async function createSceneController({ canvas, width, height }) {
           int material,
           inout HitInfo hit
         ) {
+          // 球体との交差判定
           vec3 oc = ray.origin - center;
           float b = dot(oc, ray.direction);
           float c = dot(oc, oc) - radius * radius;
@@ -149,6 +154,92 @@ export async function createSceneController({ canvas, width, height }) {
           hit.albedo = albedo;
           hit.emission = emission;
           hit.material = material;
+        }
+
+        void tryBox(
+          Ray ray,
+          vec3 minBounds,
+          vec3 maxBounds,
+          vec3 albedo,
+          vec3 emission,
+          int material,
+          inout HitInfo hit
+        ) {
+          // 軸平行境界ボックス（AABB）との交差判定
+          vec3 invDir = 1.0 / ray.direction;
+          vec3 t0 = (minBounds - ray.origin) * invDir;
+          vec3 t1 = (maxBounds - ray.origin) * invDir;
+          vec3 tMin = min(t0, t1);
+          vec3 tMax = max(t0, t1);
+          float tNear = max(max(tMin.x, tMin.y), tMin.z);
+          float tFar = min(min(tMax.x, tMax.y), tMax.z);
+          if (tFar < 0.001 || tNear > tFar || tNear >= hit.t) {
+            return;
+          }
+          float tHit = max(tNear, 0.001);
+          vec3 pos = ray.origin + ray.direction * tHit;
+          vec3 normal = vec3(0.0);
+          const float EPS = 0.001;
+          if (abs(pos.x - minBounds.x) < EPS) normal = vec3(-1.0, 0.0, 0.0);
+          else if (abs(pos.x - maxBounds.x) < EPS) normal = vec3(1.0, 0.0, 0.0);
+          else if (abs(pos.y - minBounds.y) < EPS) normal = vec3(0.0, -1.0, 0.0);
+          else if (abs(pos.y - maxBounds.y) < EPS) normal = vec3(0.0, 1.0, 0.0);
+          else if (abs(pos.z - minBounds.z) < EPS) normal = vec3(0.0, 0.0, -1.0);
+          else normal = vec3(0.0, 0.0, 1.0);
+          hit.t = tHit;
+          hit.position = pos;
+          hit.normal = normal;
+          hit.albedo = albedo;
+          hit.emission = emission;
+          hit.material = material;
+        }
+
+        void tryBoxTransformed(
+          Ray ray,
+          vec3 minBounds,
+          vec3 maxBounds,
+          mat4 transform,
+          vec3 albedo,
+          vec3 emission,
+          int material,
+          inout HitInfo hit
+        ) {
+          mat4 invTransform = inverse(transform);
+          Ray localRay = Ray(
+            (invTransform * vec4(ray.origin, 1.0)).xyz,
+            (invTransform * vec4(ray.direction, 0.0)).xyz
+          );
+
+          HitInfo localHit;
+          localHit.t = hit.t;
+          localHit.position = vec3(0.0);
+          localHit.normal = vec3(0.0);
+          localHit.albedo = albedo;
+          localHit.emission = emission;
+          localHit.material = MATERIAL_NONE;
+
+          tryBox(localRay, minBounds, maxBounds, albedo, emission, material, localHit);
+          if (localHit.material == MATERIAL_NONE) {
+            return;
+          }
+
+          vec3 worldPos = (transform * vec4(localHit.position, 1.0)).xyz;
+          float tWorld = dot(worldPos - ray.origin, ray.direction);
+          if (tWorld < 0.001 || tWorld >= hit.t) {
+            return;
+          }
+
+          vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localHit.normal);
+          if (dot(worldNormal, ray.direction) > 0.0) {
+            worldNormal = -worldNormal;
+          }
+
+          hit.t = tWorld;
+          hit.position = worldPos;
+          hit.normal = worldNormal;
+          hit.albedo = localHit.albedo;
+          hit.emission = localHit.emission;
+          hit.material = localHit.material;
         }
 
         void tryGround(Ray ray, inout HitInfo hit) {
@@ -172,6 +263,7 @@ export async function createSceneController({ canvas, width, height }) {
         }
 
         void intersectScene(Ray ray, inout HitInfo hit) {
+          // シーン内のオブジェクトとの交差をすべてチェック
           hit.material = MATERIAL_NONE;
           hit.t = 1e20;
 
@@ -187,11 +279,32 @@ export async function createSceneController({ canvas, width, height }) {
 
           trySphere(ray, centerA, 1.0, vec3(0.85, 0.3, 0.2), vec3(0.0), MATERIAL_LAMBERT, hit);
           trySphere(ray, centerB, 0.8, vec3(0.15, 0.16, 0.5), vec3(0.0), MATERIAL_MIRROR, hit);
-          trySphere(ray, centerC, 0.6, vec3(0.8, 0.8, 0.3), vec3(0.0), MATERIAL_LAMBERT, hit);
-          trySphere(ray, vec3(0.0, 3.5, 0.0), 0.8, vec3(0.0), lightEmission, MATERIAL_LIGHT, hit);
+          trySphere(ray, centerC, 0.6, vec3(0.8, 0.8, 0.3), vec3(0.0), MATERIAL_MIRROR, hit);
+          vec3 boxMin = vec3(-0.6, -0.45, -0.4);
+          vec3 boxMax = vec3(0.6, 0.45, 0.4);
+          float boxSpin = time * 2.6;
+          float c = cos(boxSpin);
+          float s = sin(boxSpin);
+          vec3 boxOffset = vec3(0.0, 0.05, -1.8 + sin(time * 2.0) * 2.0);
+          mat4 rotation = mat4(
+            vec4(c, 0.0, -s, 0.0),
+            vec4(0.0, 1.0, 0.0, 0.0),
+            vec4(s, 0.0, c, 0.0),
+            vec4(0.0, 0.0, 0.0, 1.0)
+          );
+          mat4 translation = mat4(
+            vec4(1.0, 0.0, 0.0, 0.0),
+            vec4(0.0, 1.0, 0.0, 0.0),
+            vec4(0.0, 0.0, 1.0, 0.0),
+            vec4(boxOffset, 1.0)
+          );
+          mat4 boxTransform = translation * rotation;
+          tryBoxTransformed(ray, boxMin, boxMax, boxTransform, vec3(0.25, 0.8, 0.3), vec3(0.0), MATERIAL_LAMBERT, hit);
+          trySphere(ray, vec3(0.0, 3.5, 0.0), 0.1, vec3(0.0), lightEmission, MATERIAL_LIGHT, hit);
         }
 
         vec3 traceRay(Ray ray, inout uint seed) {
+          // パストレーシングで放射輝度を積算
           vec3 throughput = vec3(1.0);
           vec3 radiance = vec3(0.0);
 
@@ -239,6 +352,7 @@ export async function createSceneController({ canvas, width, height }) {
         }
 
         void main() {
+          // ピクセルごとに複数サンプルを集めて平均化
           vec2 pixel = gl_FragCoord.xy;
           vec2 ndc = (pixel / uResolution) * 2.0 - 1.0;
           float aspect = uResolution.x / uResolution.y;
@@ -275,14 +389,32 @@ export async function createSceneController({ canvas, width, height }) {
         }
       `,
       depthTest: false
-    })
+    });
+  } catch (err) {
+    log?.(`ShaderMaterial creation failed: ${err?.message || err}`);
+    throw err;
+  }
+
+  const quad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    shaderMaterial
   );
 
   scene.add(quad);
 
   async function renderFrame(tSec) {
     uniforms.uTime.value = tSec;
-    renderer.render(scene, camera);
+    try {
+      renderer.render(scene, camera);
+    } catch (err) {
+      log?.(`Shader render failed: ${err?.message || err}`);
+      const glContext = renderer?.getContext?.();
+      const glError = glContext?.getError?.();
+      if (glError && glContext && glError !== glContext.NO_ERROR) {
+        log?.(`WebGL error code: 0x${glError.toString(16)}`);
+      }
+      throw err;
+    }
   }
 
   function resize(nextWidth, nextHeight) {
