@@ -12,11 +12,6 @@ vec3 environment(Ray ray) {
 //シーンのhit test 
 void intersectScene(Ray ray, inout HitInfo hit) {
   // シーン内のオブジェクトとの交差をすべてチェック
-  hit.material = MATERIAL_NONE;
-  hit.t = 1e20;
-  hit.specular = vec3(0.1, 0.1, 0.1);
-  hit.roughness = 0.5;
-
   tryGround(ray, hit);
 
   float lightPulse = 0.65;
@@ -27,9 +22,13 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   vec3 centerB = vec3(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5));
   vec3 centerC = vec3(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5);
 
-  trySphere(ray, centerA, 1.0, vec3(0.85, 0.3, 0.2), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT, hit);
-  trySphere(ray, centerB, 0.8, vec3(0.15, 0.16, 0.5), vec3(0.0), vec3(0.95), 0.02, MATERIAL_MIRROR, hit);
-  trySphere(ray, centerC, 0.6, vec3(0.55, 0.5, 0.0), vec3(0.0), vec3(1.0, 1.0, 0.2), 0.5, MATERIAL_GLOSSY, hit);
+  Material redLambert = Material(vec3(0.85, 0.3, 0.2), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT);
+  Material blueMirror = Material(vec3(0.15, 0.16, 0.5), vec3(0.0), vec3(0.95), 0.02, MATERIAL_MIRROR);
+  Material goldGlossy = Material(vec3(0.55, 0.5, 0.0), vec3(0.0), vec3(1.0, 1.0, 0.2), 0.5, MATERIAL_GLOSSY);
+
+  trySphere(ray, centerA, 1.0, redLambert, hit);
+  trySphere(ray, centerB, 0.8, blueMirror, hit);
+  trySphere(ray, centerC, 0.6, goldGlossy, hit);
   vec3 boxMin = vec3(-0.6, -0.45, -0.4);
   vec3 boxMax = vec3(0.6, 0.45, 0.4);
   float boxSpin = time * 2.6;
@@ -49,6 +48,9 @@ void intersectScene(Ray ray, inout HitInfo hit) {
     vec4(boxOffset, 1.0)
   );
   mat4 boxTransform = translation * rotation;
-  tryBoxTransformed(ray, boxMin, boxMax, boxTransform, vec3(0.25, 0.8, 0.3), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT, hit);
-  trySphere(ray, vec3(0.0, 3.5, 0.0), 0.5, vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT, hit);
+  Material boxLambert = Material(vec3(0.25, 0.8, 0.3), vec3(0.0), vec3(0.0), 1.0, MATERIAL_LAMBERT);
+  tryBoxTransformed(ray, boxMin, boxMax, boxTransform, boxLambert, hit);
+
+  Material lightSource = Material(vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT);
+  trySphere(ray, vec3(0.0, 3.5, 0.0), 0.5, lightSource, hit);
 }

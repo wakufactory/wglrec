@@ -17,16 +17,21 @@ const int MATERIAL_MIRROR = 1;
 const int MATERIAL_LIGHT = 2;
 const int MATERIAL_GLOSSY = 3;
 
-// hit 
-struct HitInfo {
-  float t;
-  vec3 position;
-  vec3 normal;
+//material
+struct Material {
   vec3 albedo;
   vec3 emission;
   vec3 specular;
   float roughness;
-  int material;
+  int type;
+};
+
+// hit状態の保持
+struct HitInfo {
+  float t;
+  vec3 position;
+  vec3 normal;
+  Material material;
 };
 
 // レイと交差情報を保持する構造体
@@ -67,11 +72,7 @@ void trySphere(
   Ray ray,
   vec3 center,
   float radius,
-  vec3 albedo,
-  vec3 emission,
-  vec3 specular,
-  float roughness,
-  int material,
+  Material material,
   inout HitInfo hit
 ) {
   // 球体との交差判定
@@ -92,10 +93,6 @@ void trySphere(
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
-  hit.albedo = albedo;
-  hit.emission = emission;
-  hit.specular = specular;
-  hit.roughness = roughness;
   hit.material = material;
 }
 
@@ -103,11 +100,7 @@ void tryBox(
   Ray ray,
   vec3 minBounds,
   vec3 maxBounds,
-  vec3 albedo,
-  vec3 emission,
-  vec3 specular,
-  float roughness,
-  int material,
+  Material material,
   inout HitInfo hit
 ) {
   // 軸平行境界ボックス（AABB）との交差判定
@@ -134,10 +127,6 @@ void tryBox(
   hit.t = tHit;
   hit.position = pos;
   hit.normal = normal;
-  hit.albedo = albedo;
-  hit.emission = emission;
-  hit.specular = specular;
-  hit.roughness = roughness;
   hit.material = material;
 }
 
@@ -146,11 +135,7 @@ void tryBoxTransformed(
   vec3 minBounds,
   vec3 maxBounds,
   mat4 transform,
-  vec3 albedo,
-  vec3 emission,
-  vec3 specular,
-  float roughness,
-  int material,
+  Material material,
   inout HitInfo hit
 ) {
   mat4 invTransform = inverse(transform);
@@ -163,14 +148,11 @@ void tryBoxTransformed(
   localHit.t = hit.t;
   localHit.position = vec3(0.0);
   localHit.normal = vec3(0.0);
-  localHit.albedo = albedo;
-  localHit.emission = emission;
-  localHit.specular = specular;
-  localHit.roughness = roughness;
-  localHit.material = MATERIAL_NONE;
+  localHit.material = material;
+  localHit.material.type = MATERIAL_NONE;
 
-  tryBox(localRay, minBounds, maxBounds, albedo, emission, specular, roughness, material, localHit);
-  if (localHit.material == MATERIAL_NONE) {
+  tryBox(localRay, minBounds, maxBounds, material, localHit);
+  if (localHit.material.type == MATERIAL_NONE) {
     return;
   }
 
@@ -188,10 +170,6 @@ void tryBoxTransformed(
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.albedo = localHit.albedo;
-  hit.emission = localHit.emission;
-  hit.specular = localHit.specular;
-  hit.roughness = localHit.roughness;
   hit.material = localHit.material;
 }
 
@@ -210,12 +188,13 @@ void tryGround(Ray ray, inout HitInfo hit) {
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
-  hit.albedo = albedo;
-  hit.emission = vec3(0.0);
-  hit.specular = vec3(0.0);
-  hit.roughness = 1.0;
-  hit.material = MATERIAL_LAMBERT;
+  hit.material.albedo = albedo;
+  hit.material.emission = vec3(0.0);
+  hit.material.specular = vec3(0.0);
+  hit.material.roughness = 1.0;
+  hit.material.type = MATERIAL_LAMBERT;
 }
+
 
 //反射方向を決める関数
 vec3 cosineSampleHemisphere(vec2 xi, vec3 normal) {
@@ -252,8 +231,9 @@ vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
   );
 }
 
-vec3 environment(Ray ray) ;   // 環境光 prototype
-void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 prototype
+//シーン定義関数prototype
+vec3 environment(Ray ray) ;   // 環境光 
+void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 
 
 // rayをトレース
 vec3 traceRay(Ray ray, inout uint seed) {
@@ -264,16 +244,20 @@ vec3 traceRay(Ray ray, inout uint seed) {
   for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
     HitInfo hit;
     hit.t = 1e20;
-    hit.material = MATERIAL_NONE;
+    hit.material.albedo = vec3(0.0);
+    hit.material.emission = vec3(0.0);
+    hit.material.specular = vec3(0.0);
+    hit.material.roughness = 1.0;
+    hit.material.type = MATERIAL_NONE;
     intersectScene(ray, hit);
 
-    if (hit.material == MATERIAL_NONE) {  //物体にヒットしなかった場合
+    if (hit.material.type == MATERIAL_NONE) {  //物体にヒットしなかった場合
       radiance += throughput * environment(ray);  //環境光を加える
       break;
     }
 
-    radiance += throughput * hit.emission;  //自己発光
-    if (hit.material == MATERIAL_LIGHT) { //光源ならそこで打ち切り
+    radiance += throughput * hit.material.emission;  //自己発光
+    if (hit.material.type == MATERIAL_LIGHT) { //光源ならそこで打ち切り
       break;
     }
 
@@ -281,15 +265,15 @@ vec3 traceRay(Ray ray, inout uint seed) {
     vec3 newDir;
 
     //鏡面反射
-    if (hit.material == MATERIAL_MIRROR) {
+    if (hit.material.type == MATERIAL_MIRROR) {
       newDir = reflect(ray.direction, hit.normal);  //反射方向は一意に定まる
-      throughput *= hit.albedo;
+      throughput *= hit.material.albedo;
     }
 
     //GLOSSY
-    if (hit.material == MATERIAL_GLOSSY) {
-      float specIntensity = max(hit.specular.r, max(hit.specular.g, hit.specular.b));
-      float diffIntensity = max(hit.albedo.r, max(hit.albedo.g, hit.albedo.b));
+    if (hit.material.type == MATERIAL_GLOSSY) {
+      float specIntensity = max(hit.material.specular.r, max(hit.material.specular.g, hit.material.specular.b));
+      float diffIntensity = max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b));
       float totalIntensity = specIntensity + diffIntensity;
       float specProb = (totalIntensity > 0.0) ? (specIntensity / totalIntensity) : 0.0;
       specProb = min(specProb, 0.95);
@@ -297,24 +281,24 @@ vec3 traceRay(Ray ray, inout uint seed) {
       float choice = rand(seed);
       if (choice < specProb && specIntensity > 0.0) {
         vec2 xiSpec = rand2(seed);
-        float gloss = clamp(1.0 - hit.roughness, 0.0, 0.999);
+        float gloss = clamp(1.0 - hit.material.roughness, 0.0, 0.999);
         float exponent = mix(5.0, 200.0, gloss * gloss);
         vec3 reflectDir = reflect(ray.direction, hit.normal);
         newDir = samplePhongLobe(reflectDir, exponent, xiSpec);
         if (dot(newDir, hit.normal) <= 0.0) {
           newDir = reflectDir;
         }
-        throughput *= hit.specular / max(specProb, 0.001);
+        throughput *= hit.material.specular / max(specProb, 0.001);
       } else {
         vec2 xiDiff = rand2(seed);
         newDir = cosineSampleHemisphere(xiDiff, hit.normal);
         float diffuseProb = max(1.0 - specProb, 0.001);
-        throughput *= hit.albedo / diffuseProb;
+        throughput *= hit.material.albedo / diffuseProb;
       }
 
       float p = max(
-        max(hit.albedo.r, max(hit.albedo.g, hit.albedo.b)),
-        max(hit.specular.r, max(hit.specular.g, hit.specular.b))
+        max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b)),
+        max(hit.material.specular.r, max(hit.material.specular.g, hit.material.specular.b))
       );
       p = clamp(p, 0.1, 0.95);
       if (bounce > 2) {
@@ -326,12 +310,12 @@ vec3 traceRay(Ray ray, inout uint seed) {
       }
     } 
     //LAMBERT
-    if (hit.material == MATERIAL_LAMBERT) {
+    if (hit.material.type == MATERIAL_LAMBERT) {
       vec2 xi = rand2(seed);
       newDir = cosineSampleHemisphere(xi, hit.normal);
-      throughput *= hit.albedo;
+      throughput *= hit.material.albedo;
       //russian roulette
-      float p = max(hit.albedo.r, max(hit.albedo.g, hit.albedo.b));
+      float p = max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b));
       if (bounce > 2) {
         float rr = rand(seed);
         if (rr > p) {
