@@ -232,6 +232,7 @@ vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
 }
 
 //シーン定義関数prototype
+void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up) ;
 vec3 environment(Ray ray) ;   // 環境光 
 void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 
 
@@ -338,6 +339,9 @@ void main() {
   vec3 camPos = uCameraPos;
   vec3 target = uCameraTarget;
   vec3 up = normalize(uCameraUp);
+
+  //カメラのアニメーション設定
+  setCamera(camPos,target,up) ;
 
   // for stereo render
   if (uStereoEye != 0.0) {

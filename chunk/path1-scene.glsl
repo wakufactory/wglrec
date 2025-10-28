@@ -1,5 +1,10 @@
 #line 2 3
 
+//frameごとのカメラ設定
+void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up) {
+  camPos.y += uTime*1. ;
+  return ;
+}
 //環境光の設定
 vec3 environment(Ray ray) {
   // 簡易なグラデーション環境光
