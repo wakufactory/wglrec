@@ -1,4 +1,5 @@
 #line 2 2
+// path tracing main module
 
 in vec2 vUv;
 uniform float uTime;
@@ -232,7 +233,7 @@ vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
 }
 
 //シーン定義関数prototype
-void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up) ;
+void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up,inout float fov) ;
 vec3 environment(Ray ray) ;   // 環境光 
 void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 
 
@@ -339,9 +340,10 @@ void main() {
   vec3 camPos = uCameraPos;
   vec3 target = uCameraTarget;
   vec3 up = normalize(uCameraUp);
+  float fov = uCameraFovY ;
 
   //カメラのアニメーション設定
-  setCamera(camPos,target,up) ;
+  setCamera(camPos,target,up,fov) ;
 
   // for stereo render
   if (uStereoEye != 0.0) {
@@ -354,7 +356,7 @@ void main() {
   vec3 forward = normalize(target - camPos);
   vec3 right = normalize(cross(forward, up));
   vec3 camUp = cross(right, forward);
-  float tanHalfFov = tan(radians(uCameraFovY) * 0.5);
+  float tanHalfFov = tan(radians(fov) * 0.5);
 
   uint baseSeed = uint(pixel.y) * 1973u + uint(pixel.x) * 9277u + 374761393u;
   baseSeed ^= uint(SPP) * 668265263u;

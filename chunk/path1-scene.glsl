@@ -1,8 +1,10 @@
 #line 2 3
+// path tracing scene 
 
 //frameごとのカメラ設定
-void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up) {
+void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up,inout float fov) {
   camPos.y += uTime*1. ;
+  fov = fov - uTime*4. ;
   return ;
 }
 //環境光の設定
