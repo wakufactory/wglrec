@@ -1,5 +1,5 @@
-// shader-path.js
-// Full-screen path tracing sample using Three.js with a fragment shader.
+// shader-chunk.js
+// Full-screen glsl sample Three.js with a fragment shader.
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 
 //shaders 
