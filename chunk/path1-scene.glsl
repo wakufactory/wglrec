@@ -57,10 +57,9 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   trySphere(ray, centerA, 1.0, redLambert, hit);
   trySphere(ray, centerB, 0.8, blueMirror, hit);
   trySphere(ray, centerC, 0.6, goldGlossy, hit);
-  vec3 boxMin = vec3(-0.6, -0.45, -0.4);
-  vec3 boxMax = vec3(0.6, 0.45, 0.4);
+  vec3 boxSize = vec3(1.2, 0.9, 0.8);
   Material boxLambert = Material(vec3(0.25, 0.8, 0.3), vec3(0.0), vec3(0.0), 1.0, MATERIAL_MIRROR);
-  tryBoxTransformed(ray, boxMin, boxMax, boxTransform, boxLambert, hit);
+  tryBoxTransformed(ray, boxSize, boxTransform, boxLambert, hit);
 
   //光源判定
   float lightPulse =1.65;

@@ -98,44 +98,9 @@ void trySphere(
   hit.material = material;
 }
 
-void tryBox(
-  Ray ray,
-  vec3 minBounds,
-  vec3 maxBounds,
-  Material material,
-  inout HitInfo hit
-) {
-  // 軸平行境界ボックス（AABB）との交差判定
-  vec3 invDir = 1.0 / ray.direction;
-  vec3 t0 = (minBounds - ray.origin) * invDir;
-  vec3 t1 = (maxBounds - ray.origin) * invDir;
-  vec3 tMin = min(t0, t1);
-  vec3 tMax = max(t0, t1);
-  float tNear = max(max(tMin.x, tMin.y), tMin.z);
-  float tFar = min(min(tMax.x, tMax.y), tMax.z);
-  if (tFar < 0.001 || tNear > tFar || tNear >= hit.t) {
-    return;
-  }
-  float tHit = max(tNear, 0.001);
-  vec3 pos = ray.origin + ray.direction * tHit;
-  vec3 normal = vec3(0.0);
-  const float EPS = 0.001;
-  if (abs(pos.x - minBounds.x) < EPS) normal = vec3(-1.0, 0.0, 0.0);
-  else if (abs(pos.x - maxBounds.x) < EPS) normal = vec3(1.0, 0.0, 0.0);
-  else if (abs(pos.y - minBounds.y) < EPS) normal = vec3(0.0, -1.0, 0.0);
-  else if (abs(pos.y - maxBounds.y) < EPS) normal = vec3(0.0, 1.0, 0.0);
-  else if (abs(pos.z - minBounds.z) < EPS) normal = vec3(0.0, 0.0, -1.0);
-  else normal = vec3(0.0, 0.0, 1.0);
-  hit.t = tHit;
-  hit.position = pos;
-  hit.normal = normal;
-  hit.material = material;
-}
-
 void tryBoxTransformed(
   Ray ray,
-  vec3 minBounds,
-  vec3 maxBounds,
+  vec3 size,
   mat4 transform,
   Material material,
   inout HitInfo hit
@@ -147,25 +112,39 @@ void tryBoxTransformed(
     0
   );
 
-  HitInfo localHit;
-  localHit.t = hit.t;
-  localHit.position = vec3(0.0);
-  localHit.normal = vec3(0.0);
-  localHit.material = material;
-  localHit.material.type = MATERIAL_NONE;
-
-  tryBox(localRay, minBounds, maxBounds, material, localHit);
-  if (localHit.material.type == MATERIAL_NONE) {
+  // 軸平行境界ボックス（AABB）との交差判定（ローカル座標系）
+  vec3 halfSize = size * 0.5;
+  vec3 minBounds = -halfSize;
+  vec3 maxBounds = halfSize;
+  vec3 invDir = 1.0 / localRay.direction;
+  vec3 t0 = (minBounds - localRay.origin) * invDir;
+  vec3 t1 = (maxBounds - localRay.origin) * invDir;
+  vec3 tMin = min(t0, t1);
+  vec3 tMax = max(t0, t1);
+  float tNear = max(max(tMin.x, tMin.y), tMin.z);
+  float tFar = min(min(tMax.x, tMax.y), tMax.z);
+  if (tFar < 0.001 || tNear > tFar) {
     return;
   }
 
-  vec3 worldPos = (transform * vec4(localHit.position, 1.0)).xyz;
+  float tLocal = max(tNear, 0.001);
+  vec3 localPos = localRay.origin + localRay.direction * tLocal;
+  vec3 localNormal = vec3(0.0);
+  const float EPS = 0.001;
+  if (abs(localPos.x + halfSize.x) < EPS) localNormal = vec3(-1.0, 0.0, 0.0);
+  else if (abs(localPos.x - halfSize.x) < EPS) localNormal = vec3(1.0, 0.0, 0.0);
+  else if (abs(localPos.y + halfSize.y) < EPS) localNormal = vec3(0.0, -1.0, 0.0);
+  else if (abs(localPos.y - halfSize.y) < EPS) localNormal = vec3(0.0, 1.0, 0.0);
+  else if (abs(localPos.z + halfSize.z) < EPS) localNormal = vec3(0.0, 0.0, -1.0);
+  else localNormal = vec3(0.0, 0.0, 1.0);
+
+  vec3 worldPos = (transform * vec4(localPos, 1.0)).xyz;
   float tWorld = dot(worldPos - ray.origin, ray.direction);
   if (tWorld < 0.001 || tWorld >= hit.t) {
     return;
   }
 
-  vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localHit.normal);
+  vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
@@ -173,7 +152,7 @@ void tryBoxTransformed(
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.material = localHit.material;
+  hit.material = material;
 }
 
 void tryGround(Ray ray, Material material, inout HitInfo hit) {
