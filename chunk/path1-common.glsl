@@ -39,6 +39,7 @@ struct HitInfo {
 struct Ray {
   vec3 origin;
   vec3 direction;
+  int kind ;
 };
 
 uint hashUint(uint x) {
@@ -142,7 +143,8 @@ void tryBoxTransformed(
   mat4 invTransform = inverse(transform);
   Ray localRay = Ray(
     (invTransform * vec4(ray.origin, 1.0)).xyz,
-    (invTransform * vec4(ray.direction, 0.0)).xyz
+    (invTransform * vec4(ray.direction, 0.0)).xyz,
+    0
   );
 
   HitInfo localHit;
@@ -174,7 +176,7 @@ void tryBoxTransformed(
   hit.material = localHit.material;
 }
 
-void tryGround(Ray ray, inout HitInfo hit) {
+void tryGround(Ray ray, Material material, inout HitInfo hit) {
   vec3 normal = vec3(0.0, 1.0, 0.0);
   float denom = dot(ray.direction, normal);
   if (abs(denom) < 0.001) return;
@@ -189,11 +191,8 @@ void tryGround(Ray ray, inout HitInfo hit) {
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
+  hit.material = material ;
   hit.material.albedo = albedo;
-  hit.material.emission = vec3(0.0);
-  hit.material.specular = vec3(0.0);
-  hit.material.roughness = 1.0;
-  hit.material.type = MATERIAL_LAMBERT;
 }
 
 
@@ -234,6 +233,7 @@ vec3 samplePhongLobe(vec3 reflectDir, float exponent, vec2 xi) {
 
 //シーン定義関数prototype
 void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up,inout float fov) ;
+void setupScene() ;
 vec3 environment(Ray ray) ;   // 環境光 
 void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 
 
@@ -242,8 +242,10 @@ vec3 traceRay(Ray ray, inout uint seed) {
   // パストレーシングで放射輝度を積算
   vec3 throughput = vec3(1.0);
   vec3 radiance = vec3(0.0);
+
   //反射上限回数分のループ
   for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
+      int rayKind = 0 ;
     HitInfo hit;
     hit.t = 1e20;
     hit.material.albedo = vec3(0.0);
@@ -270,6 +272,7 @@ vec3 traceRay(Ray ray, inout uint seed) {
     if (hit.material.type == MATERIAL_MIRROR) {
       newDir = reflect(ray.direction, hit.normal);  //反射方向は一意に定まる
       throughput *= hit.material.albedo;
+      rayKind = HIDDEN_LIGHT ;
     }
 
     //GLOSSY
@@ -291,6 +294,7 @@ vec3 traceRay(Ray ray, inout uint seed) {
           newDir = reflectDir;
         }
         throughput *= hit.material.specular / max(specProb, 0.001);
+        rayKind = 0 ;
       } else {
         vec2 xiDiff = rand2(seed);
         newDir = cosineSampleHemisphere(xiDiff, hit.normal);
@@ -327,7 +331,7 @@ vec3 traceRay(Ray ray, inout uint seed) {
       }
     }
 
-    ray = Ray(origin, newDir);
+    ray = Ray(origin, newDir,rayKind);
   }
 
   return radiance;
@@ -344,6 +348,8 @@ void main() {
 
   //カメラのアニメーション設定
   setCamera(camPos,target,up,fov) ;
+  //シーンの初期化
+  setupScene() ;
 
   // for stereo render
   if (uStereoEye != 0.0) {
@@ -371,7 +377,7 @@ void main() {
       right * jittered.x * aspect * tanHalfFov +
       camUp * jittered.y * tanHalfFov
     );
-    Ray ray = Ray(camPos, dir);
+    Ray ray = Ray(camPos, dir,0);
     accum += traceRay(ray, seed);
   }
 
