@@ -23,6 +23,8 @@ let sceneModuleUrl = './scene-default.js';
 let renderContext = null; // WebGLRenderingContext | WebGL2RenderingContext | null
 let cancelRequested = false;
 let isRendering = false;
+let sceneInitLock = Promise.resolve();
+let sceneInitInFlight = null;
 
 // ====== エンコード関連 ======
 let encoder = null;
@@ -99,6 +101,12 @@ async function handleInit({ canvas: initCanvas, sceneModule }) {
   await initScene(sceneModule);
   ready = true;
   log('Worker initialized.');
+  postMessage({
+    type: 'ready',
+    sceneModule: sceneModuleUrl,
+    width,
+    height
+  });
 }
 
 function handleResize({ width: nextWidth, height: nextHeight }) {
@@ -190,50 +198,69 @@ function applyResize(nextWidth, nextHeight) {
 
 // ====== シーン初期化 ======
 async function initScene(modulePath){
-  const resolvedUrl =
-    (typeof modulePath === 'string' && modulePath.trim()) ||
-    (sceneModuleUrl && sceneModuleUrl.trim()) ||
-    './scene-default.js';
+  await sceneInitLock;
+  let releaseLock = () => {};
+  sceneInitLock = new Promise((resolve) => {
+    releaseLock = resolve;
+  });
 
-  destroyCurrentScene();
+  const initPromise = (async () => {
+    const resolvedUrl =
+      (typeof modulePath === 'string' && modulePath.trim()) ||
+      (sceneModuleUrl && sceneModuleUrl.trim()) ||
+      './scene-default.js';
 
-  const { surface, width: surfaceWidth, height: surfaceHeight, reusedInitial } =
-    createRenderingCanvas(width, height);
-  canvas = surface;
-  width = surfaceWidth;
-  height = surfaceHeight;
-  if (!reusedInitial) {
-    initialCanvas = canvas;
-  }
+    destroyCurrentScene();
 
-  const mod = await import(createCacheBustedModuleUrl(resolvedUrl));
-  const factory = typeof mod.createSceneController === 'function'
-    ? mod.createSceneController
-    : typeof mod.default === 'function'
-      ? mod.default
-      : null;
-  if (typeof factory !== 'function') {
-    throw new Error(`Scene module ${resolvedUrl} must export createSceneController()`);
-  }
+    const { surface, width: surfaceWidth, height: surfaceHeight, reusedInitial } =
+      createRenderingCanvas(width, height);
+    canvas = surface;
+    width = surfaceWidth;
+    height = surfaceHeight;
+    if (!reusedInitial) {
+      initialCanvas = canvas;
+    }
 
-  const controllerLog = (msg) => log(`[scene] ${msg}`);
-  const controller = await factory({ canvas, width, height, log: controllerLog });
-  if (typeof controller?.renderFrame !== 'function') {
-    throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
-  }
+    const mod = await import(createCacheBustedModuleUrl(resolvedUrl));
+    const factory = typeof mod.createSceneController === 'function'
+      ? mod.createSceneController
+      : typeof mod.default === 'function'
+        ? mod.default
+        : null;
+    if (typeof factory !== 'function') {
+      throw new Error(`Scene module ${resolvedUrl} must export createSceneController()`);
+    }
 
-  sceneController = controller;
-  sceneModuleUrl = resolvedUrl;
-  renderer = controller.renderer ?? null;
-  renderFrame = controller.renderFrame.bind(controller);
-  renderContext = resolveRenderContext(controller);
-  if (!renderer && typeof controller.resize !== 'function') {
-    log(`Scene ${resolvedUrl} does not provide renderer.resize; resize fallback unavailable.`);
+    const controllerLog = (msg) => log(`[scene] ${msg}`);
+    const controller = await factory({ canvas, width, height, log: controllerLog });
+    if (typeof controller?.renderFrame !== 'function') {
+      throw new Error(`Scene module ${resolvedUrl} returned invalid controller`);
+    }
+
+    sceneController = controller;
+    sceneModuleUrl = resolvedUrl;
+    renderer = controller.renderer ?? null;
+    renderFrame = controller.renderFrame.bind(controller);
+    renderContext = resolveRenderContext(controller);
+    if (!renderer && typeof controller.resize !== 'function') {
+      log(`Scene ${resolvedUrl} does not provide renderer.resize; resize fallback unavailable.`);
+    }
+  })();
+
+  sceneInitInFlight = initPromise;
+  try {
+    await initPromise;
+  } finally {
+    if (sceneInitInFlight === initPromise) {
+      sceneInitInFlight = null;
+    }
+    releaseLock();
   }
 }
 
 // 任意時刻 t（秒）で1フレームだけ描画
 async function renderAtTime(tSec){
+  await waitForSceneInitialization();
   if (typeof renderFrame !== 'function') {
     throw new Error('Scene render function not configured');
   }
@@ -243,6 +270,7 @@ async function renderAtTime(tSec){
 
 // ====== オフライン 1フレームずつ → WebCodecs へ投入 ======
 async function renderAndEncode(totalFrames){
+  await waitForSceneInitialization();
   if (typeof renderFrame !== 'function') {
     throw new Error('Scene render function not configured');
   }
@@ -380,6 +408,7 @@ async function waitForGpu(){
 }
 
 async function captureBitmap(){
+  await waitForSceneInitialization();
   if (!canvas) {
     throw new Error('Canvas not configured');
   }
@@ -525,4 +554,18 @@ function clampDimension(value){
   const num = Number.isFinite(value) ? value : 1;
   const clamped = Math.max(1, num);
   return Math.floor(clamped);
+}
+
+async function waitForSceneInitialization(){
+  // Wait for any in-flight scene initialization to settle before proceeding.
+  while (true) {
+    const pending = sceneInitInFlight;
+    if (!pending) {
+      return;
+    }
+    await pending;
+    if (sceneInitInFlight === pending) {
+      return;
+    }
+  }
 }

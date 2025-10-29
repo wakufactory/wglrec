@@ -84,6 +84,7 @@
   const sceneModuleEl = document.getElementById('sceneModule');
   const btnReloadScene = document.getElementById('btnReloadScene');
   let renderInFlight = false;
+  let workerReady = false;
   function log(...args){
     console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
@@ -135,7 +136,6 @@
     sceneModuleEl.value = initialSceneModule;
   }
   worker.postMessage({ type:'init', sceneModule: initialSceneModule, canvas: off }, [off]);
-  setTimeout(()=>{worker.postMessage({ type:'loadScene', module: initialSceneModule, timeSec: 0 })},500);
 
   // 受信ハンドラ（プレビュー画像・進捗・完了）
   const chunks = []; // muxer側から最終的にBlob一発で来る設計だが保険で残す
@@ -173,6 +173,10 @@
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+    } else if (type === 'ready') {
+      workerReady = true;
+      log('[main] worker ready');
+      handleWorkerReady(ev.data);
     } else if (type === 'log') {
       log(ev.data.message);
     } else if (type === 'error') {
@@ -377,4 +381,15 @@
     worker.postMessage({ type:'cancelRender' });
     log('[main] cancel requested');
   };
+
+  function handleWorkerReady(payload = {}) {
+    if (!workerReady || !worker) {
+      return;
+    }
+    const modulePath = payload.sceneModule || getSceneModuleValue();
+    currentSceneModule = modulePath;
+    const previewTime = ensurePreviewWithinBounds();
+    log(`[main] initial scene load => ${modulePath} @ t=${previewTime.toFixed(3)}`);
+    worker.postMessage({ type:'loadScene', module: modulePath, timeSec: previewTime });
+  }
 </script>
