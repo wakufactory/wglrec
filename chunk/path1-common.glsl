@@ -335,7 +335,9 @@ void main() {
     res.x /= 2.0;
     if (uStereoEye > 0.0) pixel -= vec2(res.x, 0.0);
     aspect /= 2.0;
-    camPos = camPos + uStereoEye * normalize(cross(target - camPos, up));
+    vec3  eyeofs = uStereoEye * normalize(cross(target - camPos, up));
+    camPos = camPos +eyeofs ;
+    target = target +eyeofs ;
   }
   vec2 ndc = (pixel / res) * 2.0 - 1.0;
   vec3 forward = normalize(target - camPos);
