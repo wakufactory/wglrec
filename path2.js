@@ -6,8 +6,8 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.m
 const SHADER_CHUNK_FILES = [
   'path2-setting.glsl',
   'path2-define.glsl',
-  'path2-model.glsl',
   'path2-material.glsl',
+  'path2-model.glsl',
   'path2-scene.glsl',
   'path2-main.glsl'
 ];
