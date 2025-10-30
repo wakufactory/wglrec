@@ -58,7 +58,7 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   trySphere(ray, centerB, 0.8, blueMirror, hit);
   trySphere(ray, centerC, 0.6, goldGlossy, hit);
   vec3 boxSize = vec3(1.2, 0.9, 0.8);
-  Material boxLambert = Material(vec3(0.25, 0.8, 0.3), vec3(0.0), vec3(0.0), 1.0, MATERIAL_MIRROR);
+  Material boxLambert = Material(vec3(1., 2, 1.), vec3(0.0), vec3(0.), 1.5, MATERIAL_TRANSPARENT);
   tryBoxTransformed(ray, boxSize, boxTransform, boxLambert, hit);
 
   //光源判定

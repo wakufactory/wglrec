@@ -13,23 +13,6 @@ uniform float uStereoEye;
 // シーン全体で共有する定数群
 const float PI = 3.141592653589793;
 
-//material
-struct Material {
-  vec3 albedo;
-  vec3 emission;
-  vec3 specular;
-  float roughness;
-  int type;
-};
-
-// hit状態の保持
-struct HitInfo {
-  float t;
-  vec3 position;
-  vec3 normal;
-  Material material;
-};
-
 // レイと交差情報を保持する構造体
 struct Ray {
   vec3 origin;
