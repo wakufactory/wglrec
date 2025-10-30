@@ -62,11 +62,11 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   tryBoxTransformed(ray, boxSize, boxTransform, boxLambert, hit);
 
   //光源判定
-  float lightPulse =1.65;
+  float lightPulse =5.65;
   vec3 lightEmission = vec3(14.0, 12.0, 9.0) * lightPulse;
   Material lightSource = Material(vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT);
   if(ray.kind==0) {
-    trySphere(ray, vec3(0.0, 6.5, 0.0), 2., lightSource, hit);
+    trySphere(ray, vec3(0.0, 6.5, 0.0), 1., lightSource, hit);
   }
 
 }

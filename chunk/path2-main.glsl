@@ -14,7 +14,6 @@ vec3 traceRay(Ray ray, inout uint seed) {
 
   //反射上限回数分のループ
   for (int bounce = 0; bounce < MAX_BOUNCES; ++bounce) {
-      int rayKind = 0 ;
     HitInfo hit;
     hit.t = 1e20;
     hit.material.albedo = vec3(0.0);
@@ -29,78 +28,15 @@ vec3 traceRay(Ray ray, inout uint seed) {
       break;
     }
 
-    radiance += throughput * hit.material.emission;  //自己発光
+    radiance += throughput * hit.material.emission;  //自己発光を加える
     if (hit.material.type == MATERIAL_LIGHT) { //光源ならそこで打ち切り
       break;
     }
 
     vec3 origin = hit.position + hit.normal * 0.001;
-    vec3 newDir;
-
-    //鏡面反射
-    if (hit.material.type == MATERIAL_MIRROR) {
-      newDir = reflect(ray.direction, hit.normal);  //反射方向は一意に定まる
-      throughput *= hit.material.albedo;
-      rayKind = HIDDEN_LIGHT ;
-    }
-
-    //GLOSSY
-    if (hit.material.type == MATERIAL_GLOSSY) {
-      float specIntensity = max(hit.material.specular.r, max(hit.material.specular.g, hit.material.specular.b));
-      float diffIntensity = max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b));
-      float totalIntensity = specIntensity + diffIntensity;
-      float specProb = (totalIntensity > 0.0) ? (specIntensity / totalIntensity) : 0.0;
-      specProb = min(specProb, 0.95);
-
-      float choice = rand(seed);
-      if (choice < specProb && specIntensity > 0.0) {
-        vec2 xiSpec = rand2(seed);
-        float gloss = clamp(1.0 - hit.material.roughness, 0.0, 0.999);
-        float exponent = mix(5.0, 200.0, gloss * gloss);
-        vec3 reflectDir = reflect(ray.direction, hit.normal);
-        newDir = samplePhongLobe(reflectDir, exponent, xiSpec);
-        if (dot(newDir, hit.normal) <= 0.0) {
-          newDir = reflectDir;
-        }
-        throughput *= hit.material.specular / max(specProb, 0.001);
-        rayKind = 0 ;
-      } else {
-        vec2 xiDiff = rand2(seed);
-        newDir = cosineSampleHemisphere(xiDiff, hit.normal);
-        float diffuseProb = max(1.0 - specProb, 0.001);
-        throughput *= hit.material.albedo / diffuseProb;
-      }
-
-      float p = max(
-        max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b)),
-        max(hit.material.specular.r, max(hit.material.specular.g, hit.material.specular.b))
-      );
-      p = clamp(p, 0.1, 0.95);
-      if (bounce > 2) {
-        float rr = rand(seed);
-        if (rr > p) {
-          break;
-        }
-        throughput *= 1.0 / p;
-      }
-    } 
-    //LAMBERT
-    if (hit.material.type == MATERIAL_LAMBERT) {
-      vec2 xi = rand2(seed);
-      newDir = cosineSampleHemisphere(xi, hit.normal);
-      throughput *= hit.material.albedo;
-      //russian roulette
-      float p = max(hit.material.albedo.r, max(hit.material.albedo.g, hit.material.albedo.b));
-      if (bounce > 2) {
-        float rr = rand(seed);
-        if (rr > p) {
-          break;
-        }
-        throughput *= 1.0 / p;
-      }
-    }
-
-    ray = Ray(origin, newDir,rayKind);
+    vec3 newDir ;
+    ray.origin = origin ;
+    updateRay(bounce,hit, ray,radiance,throughput,seed) ;
   }
 
   return radiance;
