@@ -44,8 +44,11 @@ export async function createSceneController({
 - `shader-template.js` : フルスクリーンクアッドとカスタムシェーダーで最小構成を示すテンプレート。
 - `shader-path.js` : フルスクリーンパストレーシングの例。
 - `scene-canvas.js` : 2D Canvas API だけで実装した軽量サンプル。
+- `shader-chunk.js` ; シェーダのglslファイルをダイナミックロードするもの
 
 `scene-canvas.js`  は WebGL に依存せず、OffscreenCanvas の 2D コンテキストを活用する例です。
+
+`shader-chunk.js` で使用するglslファイルはchunkフォルダの下にあります。
 
 どちらも `createSceneController` を実装しているので、新しいシーンを作成する際の参考になります。
 
