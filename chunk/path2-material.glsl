@@ -44,9 +44,8 @@ void updateRay(
   int bounce,
   HitInfo hit,
   inout Ray ray,
-  inout vec3 radiance,
   inout vec3 throughput,
-  inout uint seed) 
+  uint seed) 
   {
     vec3 newDir ;
     //鏡面反射

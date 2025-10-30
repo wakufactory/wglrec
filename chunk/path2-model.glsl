@@ -1,6 +1,10 @@
 #line 2 2
 
 // 各オブジェクトとの交差判定
+// in ray,material
+// out hit
+
+// 球体との交差判定
 void trySphere(
   Ray ray,
   vec3 center,
@@ -8,7 +12,7 @@ void trySphere(
   Material material,
   inout HitInfo hit
 ) {
-  // 球体との交差判定
+
   vec3 oc = ray.origin - center;
   float b = dot(oc, ray.direction);
   float c = dot(oc, oc) - radius * radius;
