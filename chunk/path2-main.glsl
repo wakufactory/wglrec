@@ -20,6 +20,8 @@ vec3 traceRay(Ray ray, inout uint seed) {
     hit.material.emission = vec3(0.0);
     hit.material.specular = vec3(0.0);
     hit.material.roughness = 1.0;
+    hit.material.metalness = 0.0;
+    hit.material.ior = 1.5;
     hit.material.type = MATERIAL_NONE;
     //シーンの交差判定
     intersectScene(ray, hit);
@@ -35,7 +37,7 @@ vec3 traceRay(Ray ray, inout uint seed) {
     }
 
     ray.origin = hit.position + hit.normal * 0.001;  //物体表面からちょっと浮かす
-    updateRay(bounce,hit, ray,throughput,seed) ;
+    if(!updateRay(bounce,hit, ray,throughput,seed)) break ;
   }
 
   return radiance;

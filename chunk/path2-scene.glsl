@@ -42,7 +42,7 @@ void setupScene() {
 void intersectScene(Ray ray, inout HitInfo hit) {
   // シーン内のオブジェクトとの交差をすべてチェック
   //地面判定
-  Material gmaterial = Material(vec3(0.0),vec3(0.0),vec3(0.0),1.0,MATERIAL_LAMBERT) ;
+  Material gmaterial = Mat_lambert(vec3(0.0));
   tryGround(ray, gmaterial,hit);
 
   float time = uTime;
@@ -50,23 +50,24 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   vec3 centerB = vec3(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5));
   vec3 centerC = vec3(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5);
 
-  Material redLambert = Material(vec3(0.85, 0.3, 0.2), vec3(0.0), vec3(0.0), 1.0, MATERIAL_MIRROR);
-  Material blueMirror = Material(vec3(0.15, 0.16, 0.5), vec3(0.0), vec3(0.95), 0.02, MATERIAL_MIRROR);
-  Material goldGlossy = Material(vec3(0.55, 0.5, 0.0), vec3(0.0), vec3(1.0, 1.0, 0.2)*2., 0., MATERIAL_GLOSSY);
+  Material redLambert = Mat_brdf(vec3(0.85, 0.3, 0.2), .3, 0.7,1.);
+  //Material redLambert = Mat_lambert(vec3(0.85, 0.3, 0.2)) ;
+  Material blueMirror = Mat_mirror(vec3(0.15, 0.16, 0.5));
+  Material goldGlossy = Mat_lambert(vec3(0.55, 0.5, 0.0));
 
   trySphere(ray, centerA, 1.0, redLambert, hit);
   trySphere(ray, centerB, 0.8, blueMirror, hit);
   trySphere(ray, centerC, 0.6, goldGlossy, hit);
   vec3 boxSize = vec3(1.2, 0.9, 0.8);
-  Material boxLambert = Material(vec3(1., 2, 1.), vec3(0.0), vec3(0.), 1.5, MATERIAL_TRANSPARENT);
+  Material boxLambert = Mat_trans(vec3(1.0, 2.0, 1.0),  vec3(0.0), 1.5);
   tryBoxTransformed(ray, boxSize, boxTransform, boxLambert, hit);
 
   //光源判定
-  float lightPulse =5.65;
-  vec3 lightEmission = vec3(14.0, 12.0, 9.0) * lightPulse;
-  Material lightSource = Material(vec3(0.0), lightEmission, vec3(0.0), 1.0, MATERIAL_LIGHT);
+  float lightPulse = 5.65;
+  vec3 lightEmission = vec3(4.0, 2.0, 9.0) * lightPulse;
+  Material lightSource = Mat_light(lightEmission);
   if(ray.kind==0) {
-    trySphere(ray, vec3(0.0, 6.5, 0.0), 1., lightSource, hit);
+    trySphere(ray, vec3(2.0, 6.5, 0.0), 1., lightSource, hit);
   }
 
 }
