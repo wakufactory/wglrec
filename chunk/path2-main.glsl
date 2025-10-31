@@ -58,11 +58,15 @@ void main() {
   setupScene() ;
 
   // for stereo render
-  if (uStereoEye != 0.0) {
+  if (STEREO != 0.0) {
+    float eye = -STEREO/2.0 ;
     res.x /= 2.0;
-    if (uStereoEye > 0.0) pixel -= vec2(res.x, 0.0);
     aspect /= 2.0;
-    vec3  eyeofs = uStereoEye * normalize(cross(target - camPos, up));
+    if (pixel.x > res.x) {
+      pixel -= vec2(res.x, 0.0);
+      eye = -eye ;
+    }
+    vec3  eyeofs = eye * normalize(cross(target - camPos, up));
     camPos = camPos +eyeofs ;
     target = target +eyeofs ;
   }
@@ -70,7 +74,7 @@ void main() {
   vec3 forward = normalize(target - camPos);
   vec3 right = normalize(cross(forward, up));
   vec3 camUp = cross(right, forward);
-  float tanHalfFov = tan(radians(fov) * 0.5);
+  float tanHalfFov = tan(radians(fov) * 0.5); 
 
   uint baseSeed = uint(pixel.y) * 1973u + uint(pixel.x) * 9277u + 374761393u;
   baseSeed ^= uint(SPP) * 668265263u;
