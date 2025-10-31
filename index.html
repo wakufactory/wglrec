@@ -22,7 +22,7 @@
   <label>Duration(sec) <input id="sec" type="number" value="5" step="0.1" min="0.1"></label>
   <label>FPS <input id="fps" type="number" value="30" step="1" min="1"></label>
   <label>Keyframe every(s) <input id="gopSec" type="number" value="2" step="0.5" min="0.5"></label>
-  <label>Bitrate(Mbps) <input id="mbps" type="number" value="6" step="0.5" min="1"></label>
+  <label>Bitrate(Mbps) <input id="mbps" type="number" value="10" step="0.5" min="1"></label>
 </fieldset>
 
 <fieldset>
@@ -56,6 +56,10 @@
   <button id="btnRender">start render（WebM outout）</button>
   <button id="btnCancelRender" disabled>cancel render</button>
   <a id="dl" download="render.webm">Download render.webm</a>
+  <div id="renderStats" style="margin-top:8px;display:flex;flex-direction:row;gap:4px;">
+    <span>elapsed: <strong id="renderElapsed">0.00</strong> sec</span>
+    <span>frame/sec: <strong id="renderFps">0.00</strong></span>
+  </div>
 </fieldset>
 
 <div id="log"></div>
@@ -83,13 +87,54 @@
   const logEl = document.getElementById('log');
   const sceneModuleEl = document.getElementById('sceneModule');
   const btnReloadScene = document.getElementById('btnReloadScene');
+  const renderElapsedEl = document.getElementById('renderElapsed');
+  const renderFpsEl = document.getElementById('renderFps');
   let renderInFlight = false;
   let workerReady = false;
+  let renderStartTime = 0;
+  let renderLastFrameCount = 0;
   function log(...args){
     console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
     logEl.scrollTop = logEl.scrollHeight;
   }
+
+  function resetRenderStats(){
+    renderStartTime = 0;
+    renderLastFrameCount = 0;
+    if (renderElapsedEl) {
+      renderElapsedEl.textContent = '0.00';
+    }
+    if (renderFpsEl) {
+      renderFpsEl.textContent = '0.00';
+    }
+  }
+
+  function updateRenderStats(doneFrames){
+    if (!renderElapsedEl || !renderFpsEl) {
+      return;
+    }
+    if (renderStartTime <= 0) {
+      renderStartTime = performance.now();
+    }
+    const elapsedSec = Math.max(0, (performance.now() - renderStartTime) / 1000);
+    const fps = elapsedSec > 0 ? doneFrames / elapsedSec : 0;
+    renderElapsedEl.textContent = elapsedSec.toFixed(2);
+    renderFpsEl.textContent = fps.toFixed(2);
+    renderLastFrameCount = doneFrames;
+  }
+
+  function finalizeRenderStats(){
+    if (!renderElapsedEl || !renderFpsEl || renderStartTime <= 0) {
+      return;
+    }
+    const elapsedSec = Math.max(0, (performance.now() - renderStartTime) / 1000);
+    renderElapsedEl.textContent = elapsedSec.toFixed(2);
+    const fps = elapsedSec > 0 ? renderLastFrameCount / elapsedSec : 0;
+    renderFpsEl.textContent = fps.toFixed(2);
+  }
+
+  resetRenderStats();
 
   function getSceneModuleValue(){
     const raw = sceneModuleEl?.value ?? '';
@@ -156,6 +201,7 @@
       bmp.close();
     } else if (type === 'progress') {
       log(`Frame ${ev.data.done}/${ev.data.total}`);
+      updateRenderStats(ev.data.done);
     } else if (type === 'done') {
       // 完成Blob URLを受け取る
       const { url, sizeBytes } = ev.data;
@@ -168,11 +214,15 @@
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     } else if (type === 'cancelled') {
       log('Render cancelled.');
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     } else if (type === 'ready') {
       workerReady = true;
       log('[main] worker ready');
@@ -184,6 +234,8 @@
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     }
   };
   worker.addEventListener('error', (ev) => {
@@ -191,10 +243,14 @@
     log('[main] worker error', ev instanceof ErrorEvent
       ? `ErrorEvent message=${ev.message} file=${ev.filename}:${ev.lineno}:${ev.colno}`
       : `Event props: ${Object.getOwnPropertyNames(ev).map((k) => `${k}=${ev[k]}`).join(', ')}`);
+    finalizeRenderStats();
+    renderStartTime = 0;
   });
   worker.addEventListener('messageerror', (ev) => {
     console.error('[main] worker messageerror', ev);
     log('[main] worker messageerror');
+    finalizeRenderStats();
+    renderStartTime = 0;
   });
 
   // ========== プレビュー描画（HUD文字オーバレイ） ==========
@@ -355,6 +411,14 @@
     const gopSec = Math.max(0.5, +gopSecEl.value);
     const mbps = Math.max(1, +mbpsEl.value);
     currentSceneModule = getSceneModuleValue();
+    renderStartTime = performance.now();
+    renderLastFrameCount = 0;
+    if (renderElapsedEl) {
+      renderElapsedEl.textContent = '0.00';
+    }
+    if (renderFpsEl) {
+      renderFpsEl.textContent = '0.00';
+    }
 
     worker.postMessage({ type:'resize', width, height });
 
