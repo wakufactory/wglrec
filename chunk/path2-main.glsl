@@ -2,7 +2,7 @@
 
 //シーン定義関数prototype
 void setCamera(inout vec3 camPos,inout vec3 target,inout vec3 up,inout float fov) ;
-void setupScene() ;
+void setupScene(float time) ;
 vec3 environment(Ray ray) ;   // 環境光 
 void intersectScene(Ray ray, inout HitInfo hit);  // シーンの交差判定 
 
@@ -55,7 +55,7 @@ void main() {
   //カメラのアニメーション設定
   setCamera(camPos,target,up,fov) ;
   //シーンの初期化
-  setupScene() ;
+  setupScene(uTime) ;
 
   // for stereo render
   if (STEREO != 0.0) {
@@ -76,7 +76,7 @@ void main() {
   vec3 camUp = cross(right, forward);
   float tanHalfFov = tan(radians(fov) * 0.5); 
 
-  uint baseSeed = uint(pixel.y) * 1973u + uint(pixel.x) * 9277u + 374761393u;
+  uint baseSeed = uint(pixel.y) * 1973u + uint(pixel.x) * 9277u + 374761393u + uint(RANDOM_SEED) * uint(uTime*100.);
   baseSeed ^= uint(SPP) * 668265263u;
   // ピクセルごとに複数サンプルを集めて平均化
   vec3 accum = vec3(0.0);

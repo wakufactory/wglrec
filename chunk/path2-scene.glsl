@@ -17,9 +17,8 @@ vec3 environment(Ray ray) {
 }
 mat4 boxTransform  ;
 //シーン初期化
-void setupScene() {
+void setupScene(float time) {
   // transform計算を初期化時に一回だけ
-  float time = uTime;
   float boxSpin = time * 2.6;
   float c = cos(boxSpin);
   float s = sin(boxSpin);
@@ -42,7 +41,7 @@ void setupScene() {
 void intersectScene(Ray ray, inout HitInfo hit) {
   // シーン内のオブジェクトとの交差をすべてチェック
   //地面判定
-  Material gmaterial = Mat_lambert(vec3(0.0));
+  Material gmaterial = Mat_brdf(vec3(0.0),.2,.7,1.);
   tryGround(ray, gmaterial,hit);
 
   float time = uTime;
@@ -53,13 +52,13 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   Material redLambert = Mat_brdf(vec3(0.85, 0.3, 0.2), .3, 0.7,1.);
   //Material redLambert = Mat_lambert(vec3(0.85, 0.3, 0.2)) ;
   Material blueMirror = Mat_mirror(vec3(0.15, 0.16, 0.5));
-  Material goldGlossy = Mat_lambert(vec3(0.55, 0.5, 0.0));
-
+ // Material goldGlossy = Mat_lambert(vec3(0.55, 0.5, 0.0));
+  Material goldGlossy = Mat_brdf(vec3(1.55, 1.5, 0.0),1.0,0.,1.);
   trySphere(ray, centerA, 1.0, redLambert, hit);
   trySphere(ray, centerB, 0.8, blueMirror, hit);
   trySphere(ray, centerC, 0.6, goldGlossy, hit);
   vec3 boxSize = vec3(1.2, 0.9, 0.8);
-  Material boxLambert = Mat_trans(vec3(1.0, 2.0, 1.0),  vec3(0.0), 1.5);
+  Material boxLambert = Mat_mirror(vec3(1.0, 2.0, 1.0));
   tryBoxTransformed(ray, boxSize, boxTransform, boxLambert, hit);
 
   //光源判定
