@@ -166,6 +166,7 @@ async function loadShaderSources(log) {
     const fragmentChunks = await Promise.all(
       globalThis.shader_settings.SHADER_CHUNK_FILES.map((name) => loadShaderChunk(name))
     );
+    if(globalThis.shader_settings.SETTINGS) fragmentChunks.unshift(globalThis.shader_settings.SETTINGS)
     fragmentChunks.unshift('precision highp float;\nprecision highp int;')
     return {
       vertex: VERTEX_SHADER_SOURCE,
