@@ -122,7 +122,7 @@ async function handlePreview({ timeSec, fps: requestedFps }) {
   await emitPreview(t, 'ui');
 }
 
-async function handleRender({ totalFrames, fps: requestedFps, bitrate: requestedBitrate, keyframeIntervalSec: requestedInterval }) {
+async function handleRender({ totalFrames, fps: requestedFps, bitrate: requestedBitrate, keyframeIntervalSec: requestedInterval, startSec, endSec }) {
   ensureReady();
   if (isRendering) {
     log('Render request ignored: already rendering.');
@@ -132,10 +132,18 @@ async function handleRender({ totalFrames, fps: requestedFps, bitrate: requested
   fps = Math.max(1, Number(requestedFps) || 30);
   bitrate = Math.max(100_000, Number(requestedBitrate) || 6_000_000);
   keyframeIntervalSec = Math.max(0.5, Number(requestedInterval) || 2);
+  const rangeStart = Math.max(0, Number(startSec) || 0);
+  let rangeEnd = Number(endSec);
+  if (!Number.isFinite(rangeEnd)) {
+    rangeEnd = rangeStart + (frames > 0 ? frames / fps : 0);
+  }
+  if (rangeEnd < rangeStart) {
+    rangeEnd = rangeStart;
+  }
   cancelRequested = false;
   isRendering = true;
   try {
-    const webmBuffer = await renderAndEncode(frames);
+    const webmBuffer = await renderAndEncode({ totalFrames: frames, startSec: rangeStart, endSec: rangeEnd });
     if (cancelRequested) {
       postMessage({ type:'cancelled' });
       return;
@@ -269,7 +277,7 @@ async function renderAtTime(tSec){
 }
 
 // ====== オフライン 1フレームずつ → WebCodecs へ投入 ======
-async function renderAndEncode(totalFrames){
+async function renderAndEncode({ totalFrames, startSec, endSec }){
   await waitForSceneInitialization();
   if (typeof renderFrame !== 'function') {
     throw new Error('Scene render function not configured');
@@ -326,13 +334,19 @@ async function renderAndEncode(totalFrames){
     // 3) ループ：各フレームを決定的に描画 → VideoFrame化 → encode
     const timePerFrameUs = Math.round(1_000_000 / fps);
     const keyframeInterval = Math.max(1, Math.round(keyframeIntervalSec * fps));
+    const baseTime = Math.max(0, Number(startSec) || 0);
+    let endTime = Number(endSec);
+    if (!Number.isFinite(endTime) || endTime < baseTime) {
+      endTime = baseTime;
+    }
     for (let i = 0; i < totalFrames; i++) {
       abortIfNeeded();
-      const t = i / fps;          // 決定的な理想時刻
-      await renderFrame(t);             // シーンを t 秒でレンダ
+      const t = baseTime + i / fps;          // レンジ開始からの決定的な理想時刻
+      const clampedT = Math.min(t, endTime);
+      await renderFrame(clampedT);             // シーンを clampedT 秒でレンダ
       await waitForGpu();
       abortIfNeeded();
-      await emitPreview(t, 'render');
+      await emitPreview(clampedT, 'render');
       abortIfNeeded();
 
       // VideoFrame へ（OffscreenCanvas からゼロコピー的に作れる）
