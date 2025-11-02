@@ -19,10 +19,11 @@
   <legend>render settings</legend>
   <label>Width <input id="w" type="number" value="1280" step="1" min="16"></label>
   <label>Height <input id="h" type="number" value="720" step="1" min="16"></label>
-  <label>Duration(sec) <input id="sec" type="number" value="5" step="0.1" min="0.1"></label>
+  <label>Start time(sec) <input id="startSec" type="number" value="0" step="0.1" min="0"></label>
+  <label>End time(sec) <input id="endSec" type="number" value="5" step="0.1" min="0"></label>
   <label>FPS <input id="fps" type="number" value="30" step="1" min="1"></label>
   <label>Keyframe every(s) <input id="gopSec" type="number" value="2" step="0.5" min="0.5"></label>
-  <label>Bitrate(Mbps) <input id="mbps" type="number" value="6" step="0.5" min="1"></label>
+  <label>Bitrate(Mbps) <input id="mbps" type="number" value="10" step="0.5" min="1"></label>
 </fieldset>
 
 <fieldset>
@@ -56,6 +57,10 @@
   <button id="btnRender">start render（WebM outout）</button>
   <button id="btnCancelRender" disabled>cancel render</button>
   <a id="dl" download="render.webm">Download render.webm</a>
+  <div id="renderStats" style="margin-top:8px;display:flex;flex-direction:row;gap:4px;">
+    <span>elapsed: <strong id="renderElapsed">0.00</strong> sec</span>
+    <span>frame/sec: <strong id="renderFps">0.00</strong></span>
+  </div>
 </fieldset>
 
 <div id="log"></div>
@@ -64,7 +69,8 @@
   // ========== UI要素 ==========
   const wEl = document.getElementById('w');
   const hEl = document.getElementById('h');
-  const secEl = document.getElementById('sec');
+  const startEl = document.getElementById('startSec');
+  const endEl = document.getElementById('endSec');
   const fpsEl = document.getElementById('fps');
   const gopSecEl = document.getElementById('gopSec');
   const mbpsEl = document.getElementById('mbps');
@@ -83,13 +89,54 @@
   const logEl = document.getElementById('log');
   const sceneModuleEl = document.getElementById('sceneModule');
   const btnReloadScene = document.getElementById('btnReloadScene');
+  const renderElapsedEl = document.getElementById('renderElapsed');
+  const renderFpsEl = document.getElementById('renderFps');
   let renderInFlight = false;
   let workerReady = false;
+  let renderStartTime = 0;
+  let renderLastFrameCount = 0;
   function log(...args){
     console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
     logEl.scrollTop = logEl.scrollHeight;
   }
+
+  function resetRenderStats(){
+    renderStartTime = 0;
+    renderLastFrameCount = 0;
+    if (renderElapsedEl) {
+      renderElapsedEl.textContent = '0.00';
+    }
+    if (renderFpsEl) {
+      renderFpsEl.textContent = '0.00';
+    }
+  }
+
+  function updateRenderStats(doneFrames){
+    if (!renderElapsedEl || !renderFpsEl) {
+      return;
+    }
+    if (renderStartTime <= 0) {
+      renderStartTime = performance.now();
+    }
+    const elapsedSec = Math.max(0, (performance.now() - renderStartTime) / 1000);
+    const fps = elapsedSec > 0 ? doneFrames / elapsedSec : 0;
+    renderElapsedEl.textContent = elapsedSec.toFixed(2);
+    renderFpsEl.textContent = fps.toFixed(2);
+    renderLastFrameCount = doneFrames;
+  }
+
+  function finalizeRenderStats(){
+    if (!renderElapsedEl || !renderFpsEl || renderStartTime <= 0) {
+      return;
+    }
+    const elapsedSec = Math.max(0, (performance.now() - renderStartTime) / 1000);
+    renderElapsedEl.textContent = elapsedSec.toFixed(2);
+    const fps = elapsedSec > 0 ? renderLastFrameCount / elapsedSec : 0;
+    renderFpsEl.textContent = fps.toFixed(2);
+  }
+
+  resetRenderStats();
 
   function getSceneModuleValue(){
     const raw = sceneModuleEl?.value ?? '';
@@ -156,6 +203,7 @@
       bmp.close();
     } else if (type === 'progress') {
       log(`Frame ${ev.data.done}/${ev.data.total}`);
+      updateRenderStats(ev.data.done);
     } else if (type === 'done') {
       // 完成Blob URLを受け取る
       const { url, sizeBytes } = ev.data;
@@ -168,11 +216,15 @@
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     } else if (type === 'cancelled') {
       log('Render cancelled.');
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     } else if (type === 'ready') {
       workerReady = true;
       log('[main] worker ready');
@@ -184,6 +236,8 @@
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;
+      finalizeRenderStats();
+      renderStartTime = 0;
     }
   };
   worker.addEventListener('error', (ev) => {
@@ -191,10 +245,14 @@
     log('[main] worker error', ev instanceof ErrorEvent
       ? `ErrorEvent message=${ev.message} file=${ev.filename}:${ev.lineno}:${ev.colno}`
       : `Event props: ${Object.getOwnPropertyNames(ev).map((k) => `${k}=${ev[k]}`).join(', ')}`);
+    finalizeRenderStats();
+    renderStartTime = 0;
   });
   worker.addEventListener('messageerror', (ev) => {
     console.error('[main] worker messageerror', ev);
     log('[main] worker messageerror');
+    finalizeRenderStats();
+    renderStartTime = 0;
   });
 
   // ========== プレビュー描画（HUD文字オーバレイ） ==========
@@ -236,25 +294,68 @@
   const PREVIEW_DEBOUNCE_MS = 120;
   let previewDebounceHandle = 0;
 
-  function updatePreviewLabel(){
+  function formatNumber(value){
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return '0';
+    }
+    return String(num);
+  }
+
+  function clampRenderRange(){
+    const fps = Math.max(1, +fpsEl.value);
+    let start = Math.max(0, Number(startEl.value));
+    if (!Number.isFinite(start)) {
+      start = 0;
+    }
+    let end = Number(endEl.value);
+    if (!Number.isFinite(end)) {
+      end = start;
+    }
+    if (end < start) {
+      end = start;
+    }
+    const minDuration = 1 / fps;
+    if ((end - start) < minDuration) {
+      end = start + minDuration;
+    }
+    startEl.value = formatNumber(start);
+    endEl.value = formatNumber(end);
+    return { start, end, fps };
+  }
+
+  function updatePreviewLabel(value){
     if (!pvSecLabelEl) return;
-    const durationSec = Math.max(0.1, +secEl.value);
-    const value = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
-    pvSecLabelEl.textContent = value.toFixed(2);
+    let t = Number(value);
+    if (!Number.isFinite(t)) {
+      t = Number(pvSecEl.value);
+    }
+    if (!Number.isFinite(t)) {
+      t = 0;
+    }
+    pvSecLabelEl.textContent = t.toFixed(2);
   }
 
   function ensurePreviewWithinBounds(){
-    const durationSec = Math.max(0.1, +secEl.value);
-    const fps = Math.max(1, +fpsEl.value);
-    pvSecEl.max = String(durationSec);
+    const { start, end, fps } = clampRenderRange();
+    pvSecEl.min = String(start);
+    pvSecEl.max = String(end);
     pvSecEl.step = String(Math.max(0.001, 1 / fps));
-    const clamped = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
+    let clamped = Number(pvSecEl.value);
+    if (!Number.isFinite(clamped)) {
+      clamped = start;
+    }
+    if (clamped < start) {
+      clamped = start;
+    } else if (clamped > end) {
+      clamped = end;
+    }
     if (Number.isNaN(clamped)) {
-      pvSecEl.value = '0';
+      pvSecEl.value = String(start);
     } else if (clamped !== +pvSecEl.value) {
       pvSecEl.value = String(clamped);
     }
-    updatePreviewLabel();
+    updatePreviewLabel(clamped);
     return clamped;
   }
 
@@ -276,10 +377,10 @@
   function sendPreviewRequest(){
     const width = +wEl.value|0, height = +hEl.value|0;
     const fps = Math.max(1, +fpsEl.value);
-    const durationSec = Math.max(0.1, +secEl.value);
-    const current = Math.min(durationSec, Math.max(0, +pvSecEl.value || 0));
+    const { start, end } = clampRenderRange();
+    const current = Math.min(end, Math.max(start, +pvSecEl.value || start));
     pvSecEl.value = String(current);
-    updatePreviewLabel();
+    updatePreviewLabel(current);
 
     worker.postMessage({ type:'resize', width, height });
     worker.postMessage({ type:'preview', timeSec: current, fps });
@@ -290,7 +391,14 @@
     queuePreview(true);
   });
 
-  secEl.addEventListener('input', () => {
+  startEl.addEventListener('change', () => {
+    const before = +pvSecEl.value || 0;
+    const after = ensurePreviewWithinBounds();
+    if (after !== before) {
+      queuePreview(true);
+    }
+  });
+  endEl.addEventListener('change', () => {
     const before = +pvSecEl.value || 0;
     const after = ensurePreviewWithinBounds();
     if (after !== before) {
@@ -349,12 +457,20 @@
     logEl.textContent = '';
 
     const width = +wEl.value|0, height = +hEl.value|0;
-    const sec = Math.max(0.1, +secEl.value);
-    const fps = Math.max(1, +fpsEl.value);
-    const total = Math.round(sec * fps);
+    const { start, end, fps } = clampRenderRange();
+    const duration = Math.max(0, end - start);
+    const total = Math.max(1, Math.round(duration * fps));
     const gopSec = Math.max(0.5, +gopSecEl.value);
     const mbps = Math.max(1, +mbpsEl.value);
     currentSceneModule = getSceneModuleValue();
+    renderStartTime = performance.now();
+    renderLastFrameCount = 0;
+    if (renderElapsedEl) {
+      renderElapsedEl.textContent = '0.00';
+    }
+    if (renderFpsEl) {
+      renderFpsEl.textContent = '0.00';
+    }
 
     worker.postMessage({ type:'resize', width, height });
 
@@ -364,7 +480,9 @@
       totalFrames: total,
       fps,
       bitrate: Math.round(mbps * 1_000_000),  // Mbps → bps
-      keyframeIntervalSec: gopSec
+      keyframeIntervalSec: gopSec,
+      startSec: start,
+      endSec: end
     });
   };
 
