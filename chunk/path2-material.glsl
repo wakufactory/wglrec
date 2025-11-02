@@ -7,6 +7,7 @@ const int MATERIAL_GLOSSY = 3;
 const int MATERIAL_TRANSPARENT = 4;
 const int MATERIAL_BRDF = 5; // Cook-Torrance系のBRDFを用いるマテリアル種別
 
+#define Mat_none() Material(vec3(0.),vec3(0.),vec3(0.),0.,0.,0.,MATERIAL_NONE) 
 #define Mat_lambert(color)  Material(color,vec3(0.),vec3(0.),0.,0.,1.,MATERIAL_LAMBERT)
 #define Mat_brdf(color,roughness,metalness,ior)  Material(color,vec3(0.),vec3(0.),roughness,metalness,ior,MATERIAL_BRDF)
 #define Mat_mirror(color)  Material(color,vec3(0.),vec3(0.),0.,0.,1.,MATERIAL_MIRROR)

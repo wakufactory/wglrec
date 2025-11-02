@@ -9,6 +9,7 @@ struct ObjParam {
 };
 struct Object {
   bool visible ;
+  int bounding ;
   int type ;
   ObjParam param ;
   Material material ;
@@ -67,36 +68,41 @@ mat4 composeTransform(vec3 rotation, vec3 scale, vec3 translation) {
 // out hit
 
 // 球体との交差判定
-void trySphere(
+bool trySphere(
   Object obj,
   Ray ray,
   inout HitInfo hit
 ) {
   vec3 center = obj.param.size1 ;
   float radius = obj.param.size2.x ;
-
   vec3 oc = ray.origin - center;
+  //boundingで球の中にある場合はtrue
+  if (obj.bounding > 0 && dot(oc, oc) <= radius * radius) {
+    return true;
+  }
   float b = dot(oc, ray.direction);
   float c = dot(oc, oc) - radius * radius;
   float disc = b * b - c;
-  if (disc < 0.0) return;
+  if (disc < 0.0) return false; //交差せず
   float s = sqrt(disc);
   float t = -b - s;
-  if (t < 0.001) {
+  if (t < 0.001) {      //交差は後ろ
     t = -b + s;
-    if (t < 0.001) return;
+    if (t < 0.001) return false ;  //反対側も衝突なし
   }
-  if (t >= hit.t) return;
+  if (t >= hit.t) return false ;   //すでに近いhitあり
+  if(obj.bounding>0) return true ;
   vec3 pos = ray.origin + ray.direction * t;
   vec3 normal = normalize(pos - center);
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
   hit.material = obj.material;
+  return true ;
 }
 
 // 球体との交差判定（transform対応）
-void trySphereTransformed(
+bool trySphereTransformed(
   Object obj,
   Ray ray,
   inout HitInfo hit
@@ -104,8 +110,7 @@ void trySphereTransformed(
   mat4 transform = obj.transform;
   float det = determinant(transform);
   if (abs(det) < 1e-6) {
-    trySphere(obj, ray, hit);
-    return;
+    return trySphere(obj, ray, hit);
   }
 
   mat4 invTransform = inverse(transform);
@@ -119,15 +124,19 @@ void trySphereTransformed(
   float radius = obj.param.size2.x;
 
   vec3 oc = localRay.origin - center;
+  //boundingで球の中にある場合はtrue
+  if (obj.bounding > 0 && dot(oc, oc) <= radius * radius) {
+    return true;
+  }
   float b = dot(oc, localRay.direction);
   float c = dot(oc, oc) - radius * radius;
   float disc = b * b - c;
-  if (disc < 0.0) return;
+  if (disc < 0.0) return false ;
   float s = sqrt(disc);
   float t = -b - s;
   if (t < 0.001) {
     t = -b + s;
-    if (t < 0.001) return;
+    if (t < 0.001) return false ;
   }
 
   vec3 localPos = localRay.origin + localRay.direction * t;
@@ -136,21 +145,22 @@ void trySphereTransformed(
   vec3 worldPos = (transform * vec4(localPos, 1.0)).xyz;
   float tWorld = dot(worldPos - ray.origin, ray.direction);
   if (tWorld < 0.001 || tWorld >= hit.t) {
-    return;
+    return  false ;
   }
 
   vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
-
+  if(obj.bounding>0) return true ;
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
   hit.material = obj.material;
+  return true ;
 }
 
-void tryBoxTransformed(
+bool tryBoxTransformed(
   Object obj,
   Ray ray,
   inout HitInfo hit
@@ -177,7 +187,7 @@ void tryBoxTransformed(
   float tNear = max(max(tMin.x, tMin.y), tMin.z);
   float tFar = min(min(tMax.x, tMax.y), tMax.z);
   if (tFar < 0.001 || tNear > tFar) {
-    return;
+    return  false ;
   }
 
   float tLocal = max(tNear, 0.001);
@@ -194,8 +204,9 @@ void tryBoxTransformed(
   vec3 worldPos = (transform * vec4(localPos, 1.0)).xyz;
   float tWorld = dot(worldPos - ray.origin, ray.direction);
   if (tWorld < 0.001 || tWorld >= hit.t) {
-    return;
+    return  false ;
   }
+  if(obj.bounding>0) return true ;
 
   vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
@@ -206,14 +217,16 @@ void tryBoxTransformed(
   hit.position = worldPos;
   hit.normal = worldNormal;
   hit.material = obj.material;
+  return true ;
 }
 
-void tryGround(Ray ray, Material material, inout HitInfo hit) {
+bool tryGround(Ray ray, Material material, inout HitInfo hit) {
   vec3 normal = vec3(0.0, 1.0, 0.0);
   float denom = dot(ray.direction, normal);
-  if (abs(denom) < 0.001) return;
+  if (abs(denom) < 0.001) return false ;
   float t = (-1.0 - ray.origin.y) / denom;
-  if (t < 0.001 || t >= hit.t) return;
+  if (t < 0.001 || t >= hit.t) return false ;
+
   vec3 pos = ray.origin + ray.direction * t;
   vec2 checkerCoords = pos.xz * 0.5;
   float checker = mod(floor(checkerCoords.x) + floor(checkerCoords.y), 2.0);
@@ -225,4 +238,5 @@ void tryGround(Ray ray, Material material, inout HitInfo hit) {
   hit.normal = normal;
   hit.material = material ;
   hit.material.albedo = albedo;
+  return true ;
 }
