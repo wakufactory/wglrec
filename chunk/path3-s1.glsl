@@ -16,9 +16,7 @@ vec3 environment(Ray ray) {
   return mix(bottom, top, clamp(t, 0.0, 2.0));
 }
 
-
-#define OBJNUM 6
-Object obj[OBJNUM] ;
+const int OBJNUM  = 6 ;
 
 //シーン初期化
 void setupScene(float time) {
@@ -26,11 +24,13 @@ void setupScene(float time) {
   int on = 0 ;
 
   //bounding sphere 
-  obj[on++] = Object(
-    true,
-    3,
+  initObject(
+    obj,
+    on++,
+    false,
+    4,
     OBJ_SPHERE,
-    ObjParam(vec3(0.,0.,0.),vec3(3.)),
+    ObjParam(vec3(0.,0.,0.), vec3(3.)),
     Mat_none(),
     false,
     m4unit
@@ -38,41 +38,52 @@ void setupScene(float time) {
   //box
   float boxSpin = time * 2.6;
   vec3 boxOffset = vec3(0.0, 0.05, -1.8 + sin(time * 2.0) * 2.0);
-  obj[on++] = Object(
-    false,
+  mat4 boxTransform = composeTransform(vec3(0., boxSpin, boxSpin), vec3(1.), boxOffset);
+  initObject(
+    obj,
+    on++,
+    true,
     0,
     OBJ_BOX,
-    ObjParam(vec3(1.2, 0.9, 0.8),vec3(0.)),
-    Mat_trans(vec3(1.0, 2.0, 1.0),  vec3(0.0), 1.5),
+    ObjParam(vec3(1.2, 0.9, 0.8), vec3(0.)),
+    Mat_mirror(vec3(1.0, 2.0, 1.0)),
     true,
-    composeTransform(vec3(0.,boxSpin,boxSpin),vec3(1.),boxOffset)
+    boxTransform
   );
   // red ball
-  obj[on++] = Object(
+  vec3 redOffset = vec3(sin(time * 0.6) * 2.0, 0.15 + 2.0 * cos(time * 0.4), -1.5);
+  mat4 redTransform = composeTransform(vec3(0.), vec3(1.0), redOffset);
+  initObject(
+    obj,
+    on++,
     true,
     0,
     OBJ_SPHERE,
-    ObjParam(vec3(0.),vec3(1.)),
-    Mat_brdf(vec3(0.85, 0.3, 0.2), .3, 0.7,1.),
+    ObjParam(vec3(0.), vec3(1.)),
+    Mat_brdf(vec3(0.85, 0.3, 0.2), .3, 0.7, 1.),
     true,
-    composeTransform(vec3(0.),vec3(1.0),vec3(sin(time * 0.6) * 2.0, 0.15 + 2.0 * cos(time * 0.4), -1.5))
+    redTransform
   );
   //blue ball
-  obj[on++] = Object(
+  initObject(
+    obj,
+    on++,
     true,
     0,
     OBJ_SPHERE,
-    ObjParam(vec3(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5)),vec3(0.8)),
+    ObjParam(vec3(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5)), vec3(0.8)),
     Mat_mirror(vec3(0.15, 0.16, 0.5)),
     false,
     m4unit
   );
   // gold ball
-  obj[on++] = Object(
+  initObject(
+    obj,
+    on++,
     true,
     0,
     OBJ_SPHERE,
-    ObjParam(vec3(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5),vec3(0.6)),
+    ObjParam(vec3(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5), vec3(0.6)),
     Mat_lambert(vec3(0.55, 0.5, 0.0)),
     false,
     m4unit
@@ -80,11 +91,13 @@ void setupScene(float time) {
   //light
   float lightPulse = 5.65;
   vec3 lightEmission = vec3(4.0, 2.0, 9.0) * lightPulse;
-  obj[on++] = Object(
+  initObject(
+    obj,
+    on++,
     true,
     0,
     OBJ_SPHERE,
-    ObjParam(vec3(2.0, 6.5, 0.0),vec3(1.)),
+    ObjParam(vec3(2.0, 6.5, 0.0), vec3(1.)),
     Mat_light(lightEmission),
     false,
     m4unit
@@ -96,20 +109,31 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   //地面判定
   Material gmaterial = Mat_lambert(vec3(0.0));
   tryGround(ray, gmaterial,hit);
-
+/*
+  if(trySphere(0,ray, hit)) {
+  tryBoxTransformed(1,ray,hit) ;
+  trySphereTransformed(2,ray, hit);
+  trySphere(3,ray, hit);
+  trySphere(4,ray, hit);
+  }
+  trySphere(5,ray, hit);
+  return ;
+*/
   for(int i=0;i<OBJNUM;i++) {
-    Object o = obj[i] ;
-    if(!o.visible) continue ;
-    if(o.bounding>0) {
-      if(!trySphere(o,ray,hit)){
-        i+= o.bounding;
+    if(!obj.visible[i]) continue ;
+    int bounding = obj.bounding[i];
+    if(bounding>0) {
+      if(!trySphere(i,ray,hit)){
+        i+= bounding;
         continue ;
       }
     }
-    if(o.type==OBJ_BOX)  tryBoxTransformed(o,ray,hit) ;
-    else if(o.type==OBJ_SPHERE) {
-      if(o.useTrans) trySphereTransformed(o,ray, hit);
-      else trySphere(o,ray, hit);
+    int type = obj.type[i];
+    if(type==OBJ_BOX)  tryBoxTransformed(i,ray,hit) ;
+    else if(type==OBJ_SPHERE) {
+      if(obj.useTrans[i]) 
+      trySphereTransformed(i,ray, hit);
+      else trySphere(i,ray, hit);
     }
   }
 

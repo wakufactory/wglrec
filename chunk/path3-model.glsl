@@ -3,65 +3,117 @@
 #define OBJ_SPHERE 1
 #define OBJ_BOX 2 
 
+const int OBJECT_CAPACITY = 16;
+
 struct ObjParam {
-  vec3 size1 ;
-  vec3 size2 ;
+  vec3 size1;
+  vec3 size2;
 };
-struct Object {
-  bool visible ;
-  int bounding ;
-  int type ;
-  ObjParam param ;
-  Material material ;
-  bool useTrans ;
-  mat4 transform ;
-} ;
+struct ObjectSOA {
+  bool visible[OBJECT_CAPACITY];
+  int bounding[OBJECT_CAPACITY];
+  int type[OBJECT_CAPACITY];
+  vec3 paramSize1[OBJECT_CAPACITY];
+  vec3 paramSize2[OBJECT_CAPACITY];
+  Material material[OBJECT_CAPACITY];
+  bool useTrans[OBJECT_CAPACITY];
+  mat4 transform[OBJECT_CAPACITY];
+  mat4 invTransform[OBJECT_CAPACITY];
+  mat3 normalMatrix[OBJECT_CAPACITY];
+};
+
+ObjectSOA objects;
 
 // rotation (XYZ, radians), scale, translation -> combined transform matrix
 mat4 composeTransform(vec3 rotation, vec3 scale, vec3 translation) {
-  float cx = cos(rotation.x);
-  float sx = sin(rotation.x);
-  float cy = cos(rotation.y);
-  float sy = sin(rotation.y);
-  float cz = cos(rotation.z);
-  float sz = sin(rotation.z);
 
-  mat4 scaleMat = mat4(
-    vec4(scale.x, 0.0, 0.0, 0.0),
-    vec4(0.0, scale.y, 0.0, 0.0),
-    vec4(0.0, 0.0, scale.z, 0.0),
-    vec4(0.0, 0.0, 0.0, 1.0)
-  );
-
-  mat4 rotX = mat4(
-    vec4(1.0, 0.0, 0.0, 0.0),
-    vec4(0.0, cx, sx, 0.0),
-    vec4(0.0, -sx, cx, 0.0),
-    vec4(0.0, 0.0, 0.0, 1.0)
-  );
-  mat4 rotY = mat4(
-    vec4(cy, 0.0, -sy, 0.0),
-    vec4(0.0, 1.0, 0.0, 0.0),
-    vec4(sy, 0.0, cy, 0.0),
-    vec4(0.0, 0.0, 0.0, 1.0)
-  );
-  mat4 rotZ = mat4(
-    vec4(cz, sz, 0.0, 0.0),
-    vec4(-sz, cz, 0.0, 0.0),
-    vec4(0.0, 0.0, 1.0, 0.0),
-    vec4(0.0, 0.0, 0.0, 1.0)
-  );
-
-  mat4 translationMat = mat4(
+  mat4 mat  = mat4(
     vec4(1.0, 0.0, 0.0, 0.0),
     vec4(0.0, 1.0, 0.0, 0.0),
     vec4(0.0, 0.0, 1.0, 0.0),
     vec4(translation, 1.0)
   );
+  if(rotation.z != 0.0) {
+    float cz = cos(rotation.z);
+    float sz = sin(rotation.z);
+    mat4 rotZ = mat4(
+    vec4(cz, sz, 0.0, 0.0),
+    vec4(-sz, cz, 0.0, 0.0),
+    vec4(0.0, 0.0, 1.0, 0.0),
+    vec4(0.0, 0.0, 0.0, 1.0)
+    );
+    mat *= rotZ ;
+  }
+  if(rotation.y !=0.0) {
+    float cy = cos(rotation.y);
+    float sy = sin(rotation.y);
+    mat4 rotY = mat4(
+    vec4(cy, 0.0, -sy, 0.0),
+    vec4(0.0, 1.0, 0.0, 0.0),
+    vec4(sy, 0.0, cy, 0.0),
+    vec4(0.0, 0.0, 0.0, 1.0)
+    );
+    mat *= rotY ;
+  }
 
-  return translationMat * rotZ * rotY * rotX * scaleMat;
+  if(rotation.x!=0.0) {
+    float cx = cos(rotation.x);
+    float sx = sin(rotation.x);
+    mat4 rotX = mat4(
+    vec4(1.0, 0.0, 0.0, 0.0),
+    vec4(0.0, cx, sx, 0.0),
+    vec4(0.0, -sx, cx, 0.0),
+    vec4(0.0, 0.0, 0.0, 1.0)
+    );
+    mat *= rotX ;
+  }
+  if(!all(equal(scale,vec3(1.,1.,1.)))) {
+    mat4 scaleMat = mat4(
+    vec4(scale.x, 0.0, 0.0, 0.0),
+    vec4(0.0, scale.y, 0.0, 0.0),
+    vec4(0.0, 0.0, scale.z, 0.0),
+    vec4(0.0, 0.0, 0.0, 1.0)
+    );
+    mat *= scaleMat;
+  };
+  return mat ;
 }
 #define m4unit mat4(1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.)
+
+void initObject(
+  int index,
+  bool visible,
+  int bounding,
+  int type,
+  ObjParam param,
+  Material material,
+  bool useTransform,
+  mat4 transform
+) {
+  objects.visible[index] = visible;
+  objects.bounding[index] = bounding;
+  objects.type[index] = type;
+  objects.paramSize1[index] = param.size1;
+  objects.paramSize2[index] = param.size2;
+  objects.material[index] = material;
+  objects.transform[index] = transform;
+  objects.useTrans[index] = useTransform;
+
+  if (useTransform) {
+    float det = determinant(transform);
+    if (abs(det) < 1e-6) {
+      objects.useTrans[index] = false;
+      objects.invTransform[index] = m4unit;
+      objects.normalMatrix[index] = mat3(1.0);
+    } else {
+      objects.invTransform[index] = inverse(transform);
+      objects.normalMatrix[index] = mat3(transpose(objects.invTransform[index]));
+    }
+  } else {
+    objects.invTransform[index] = m4unit;
+    objects.normalMatrix[index] = mat3(1.0);
+  }
+}
 
 // 各オブジェクトとの交差判定
 // in ray,material
@@ -69,15 +121,16 @@ mat4 composeTransform(vec3 rotation, vec3 scale, vec3 translation) {
 
 // 球体との交差判定
 bool trySphere(
-  Object obj,
+  int index,
   Ray ray,
   inout HitInfo hit
 ) {
-  vec3 center = obj.param.size1 ;
-  float radius = obj.param.size2.x ;
+  vec3 center = objects.paramSize1[index];
+  float radius = objects.paramSize2[index].x;
+  int bounding = objects.bounding[index];
   vec3 oc = ray.origin - center;
   //boundingで球の中にある場合はtrue
-  if (obj.bounding > 0 && dot(oc, oc) <= radius * radius) {
+  if (bounding > 0 && dot(oc, oc) <= radius * radius) {
     return true;
   }
   float b = dot(oc, ray.direction);
@@ -91,41 +144,41 @@ bool trySphere(
     if (t < 0.001) return false ;  //反対側も衝突なし
   }
   if (t >= hit.t) return false ;   //すでに近いhitあり
-  if(obj.bounding>0) return true ;
+  if (bounding > 0) return true;
   vec3 pos = ray.origin + ray.direction * t;
   vec3 normal = normalize(pos - center);
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
-  hit.material = obj.material;
+  hit.material = objects.material[index];
   return true ;
 }
 
 // 球体との交差判定（transform対応）
 bool trySphereTransformed(
-  Object obj,
+  int index,
   Ray ray,
   inout HitInfo hit
 ) {
-  mat4 transform = obj.transform;
-  float det = determinant(transform);
-  if (abs(det) < 1e-6) {
-    return trySphere(obj, ray, hit);
+  if (!objects.useTrans[index]) {
+    return trySphere(index, ray, hit);
   }
 
-  mat4 invTransform = inverse(transform);
+  mat4 transform = objects.transform[index];
+  mat4 invTransform = objects.invTransform[index];
   Ray localRay = Ray(
     (invTransform * vec4(ray.origin, 1.0)).xyz,
     (invTransform * vec4(ray.direction, 0.0)).xyz,
     0
   );
 
-  vec3 center = obj.param.size1;
-  float radius = obj.param.size2.x;
+  vec3 center = objects.paramSize1[index];
+  float radius = objects.paramSize2[index].x;
+  int bounding = objects.bounding[index];
 
   vec3 oc = localRay.origin - center;
   //boundingで球の中にある場合はtrue
-  if (obj.bounding > 0 && dot(oc, oc) <= radius * radius) {
+  if (bounding > 0 && dot(oc, oc) <= radius * radius) {
     return true;
   }
   float b = dot(oc, localRay.direction);
@@ -148,27 +201,34 @@ bool trySphereTransformed(
     return  false ;
   }
 
-  vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
+  vec3 worldNormal = normalize(objects.normalMatrix[index] * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
-  if(obj.bounding>0) return true ;
+  if (bounding > 0) return true;
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.material = obj.material;
+  hit.material = objects.material[index];
   return true ;
 }
 
 bool tryBoxTransformed(
-  Object obj,
+  int index,
   Ray ray,
   inout HitInfo hit
 ) {
-  vec3 size = obj.param.size1 ;
-  mat4 transform = obj.transform ;
+  vec3 size = objects.paramSize1[index];
+  mat4 transform = objects.transform[index];
+  mat4 invTransform = objects.invTransform[index];
+  int bounding = objects.bounding[index];
+  bool isTransformed = objects.useTrans[index];
 
-  mat4 invTransform = inverse(transform);
+  if (!isTransformed) {
+    transform = m4unit;
+    invTransform = m4unit;
+  }
+
   Ray localRay = Ray(
     (invTransform * vec4(ray.origin, 1.0)).xyz,
     (invTransform * vec4(ray.direction, 0.0)).xyz,
@@ -179,6 +239,12 @@ bool tryBoxTransformed(
   vec3 halfSize = size * 0.5;
   vec3 minBounds = -halfSize;
   vec3 maxBounds = halfSize;
+    // ここで内側チェック
+  if (bounding > 0 &&
+      all(greaterThanEqual(localRay.origin, minBounds)) &&
+      all(lessThanEqual(localRay.origin, maxBounds))) {
+    return true;
+  }
   vec3 invDir = 1.0 / localRay.direction;
   vec3 t0 = (minBounds - localRay.origin) * invDir;
   vec3 t1 = (maxBounds - localRay.origin) * invDir;
@@ -206,9 +272,9 @@ bool tryBoxTransformed(
   if (tWorld < 0.001 || tWorld >= hit.t) {
     return  false ;
   }
-  if(obj.bounding>0) return true ;
+  if (bounding > 0) return true;
 
-  vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
+  vec3 worldNormal = normalize(objects.normalMatrix[index] * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
@@ -216,7 +282,7 @@ bool tryBoxTransformed(
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.material = obj.material;
+  hit.material = objects.material[index];
   return true ;
 }
 
