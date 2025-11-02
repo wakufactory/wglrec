@@ -1,6 +1,8 @@
 // render settings
 const int MAX_BOUNCES = 4;
-const int SPP = 20; // samples per pixel
-const int HIDDEN_LIGHT = 0 ;    //invisible mirror 
-const float STEREO = 0.3 ;       // stereo ipd 
-const int RANDOM_SEED = 0 ; //random noize seed par frame
+const int SPP = 4; // samples per pixel
+const float STEREO = 0. ;       // stereo ipd 
+const bool STEREO_TARGET = true ; //stereo target   
+const int RANDOM_SEED = 1 ; //random noize seed par frame
+ 
+ const int HIDDEN_LIGHT = 0 ;    //invisible mirror 

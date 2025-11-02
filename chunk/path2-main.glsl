@@ -68,7 +68,7 @@ void main() {
     }
     vec3  eyeofs = eye * normalize(cross(target - camPos, up));
     camPos = camPos +eyeofs ;
-    target = target +eyeofs ;
+    if(STEREO_TARGET) target = target +eyeofs ;
   }
   vec2 ndc = (pixel / res) * 2.0 - 1.0;
   vec3 forward = normalize(target - camPos);
