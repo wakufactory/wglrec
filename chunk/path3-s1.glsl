@@ -25,7 +25,6 @@ void setupScene(float time) {
 
   //bounding sphere 
   initObject(
-    obj,
     on++,
     false,
     4,
@@ -40,7 +39,6 @@ void setupScene(float time) {
   vec3 boxOffset = vec3(0.0, 0.05, -1.8 + sin(time * 2.0) * 2.0);
   mat4 boxTransform = composeTransform(vec3(0., boxSpin, boxSpin), vec3(1.), boxOffset);
   initObject(
-    obj,
     on++,
     true,
     0,
@@ -54,19 +52,17 @@ void setupScene(float time) {
   vec3 redOffset = vec3(sin(time * 0.6) * 2.0, 0.15 + 2.0 * cos(time * 0.4), -1.5);
   mat4 redTransform = composeTransform(vec3(0.), vec3(1.0), redOffset);
   initObject(
-    obj,
     on++,
     true,
     0,
     OBJ_SPHERE,
-    ObjParam(vec3(0.), vec3(1.)),
+    ObjParam(redOffset, vec3(1.)),
     Mat_brdf(vec3(0.85, 0.3, 0.2), .3, 0.7, 1.),
-    true,
+    false,
     redTransform
   );
   //blue ball
   initObject(
-    obj,
     on++,
     true,
     0,
@@ -78,7 +74,6 @@ void setupScene(float time) {
   );
   // gold ball
   initObject(
-    obj,
     on++,
     true,
     0,
@@ -92,7 +87,6 @@ void setupScene(float time) {
   float lightPulse = 5.65;
   vec3 lightEmission = vec3(4.0, 2.0, 9.0) * lightPulse;
   initObject(
-    obj,
     on++,
     true,
     0,
@@ -111,29 +105,35 @@ void intersectScene(Ray ray, inout HitInfo hit) {
   tryGround(ray, gmaterial,hit);
 /*
   if(trySphere(0,ray, hit)) {
-  tryBoxTransformed(1,ray,hit) ;
-  trySphereTransformed(2,ray, hit);
-  trySphere(3,ray, hit);
-  trySphere(4,ray, hit);
+    tryBoxTransformed(1,ray,hit) ;
+    trySphereTransformed(2,ray, hit);
+    trySphere(3,ray, hit);
+    trySphere(4,ray, hit);
   }
   trySphere(5,ray, hit);
   return ;
 */
   for(int i=0;i<OBJNUM;i++) {
-    if(!obj.visible[i]) continue ;
-    int bounding = obj.bounding[i];
-    if(bounding>0) {
+    int bounding = objects.bounding[i];
+    bool isVisible = objects.visible[i];
+    if(bounding > 0) {
       if(!trySphere(i,ray,hit)){
-        i+= bounding;
+        i += bounding;
         continue ;
       }
+      if(!isVisible) continue;
+    } else if(!isVisible) {
+      continue;
     }
-    int type = obj.type[i];
-    if(type==OBJ_BOX)  tryBoxTransformed(i,ray,hit) ;
-    else if(type==OBJ_SPHERE) {
-      if(obj.useTrans[i]) 
-      trySphereTransformed(i,ray, hit);
-      else trySphere(i,ray, hit);
+    int type = objects.type[i];
+    if(type==OBJ_BOX) {
+      tryBoxTransformed(i,ray,hit);
+    } else if(type==OBJ_SPHERE) {
+      if(objects.useTrans[i]) {
+        trySphereTransformed(i,ray, hit);
+      } else {
+        trySphere(i,ray, hit);
+      }
     }
   }
 
