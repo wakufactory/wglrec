@@ -404,6 +404,10 @@ function resetEncodingPipeline(){
 function nap(ms = 0){ return new Promise(r => setTimeout(r, ms)); }
 function ensureReady(){ if (!ready) throw new Error('Worker not initialized'); }
 async function waitForGpu(){
+  if (typeof sceneController?.waitForGpu === 'function') {
+    await sceneController.waitForGpu();
+    return;
+  }
   const gl = await getRenderableContext();
   if (!gl) return;
   if (typeof gl.fenceSync !== 'function') {
