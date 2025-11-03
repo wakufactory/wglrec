@@ -41,7 +41,7 @@ void setupScene(float time) {
 void intersectScene(Ray ray, inout HitInfo hit) {
   // シーン内のオブジェクトとの交差をすべてチェック
   //地面判定
-  Material gmaterial = Mat_brdf(vec3(0.0),.2,.7,1.);
+  Material gmaterial = Mat_lambert(vec3(0.0));
   tryGround(ray, gmaterial,hit);
 
   float time = uTime;
