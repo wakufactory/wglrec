@@ -68,10 +68,13 @@ fn inverseMat3(m : mat3x3<f32>) -> mat3x3<f32> {
     );
   }
   let invDet = 1.0 / det;
+  let row0 = c0 * invDet;
+  let row1 = c1 * invDet;
+  let row2 = c2 * invDet;
   return mat3x3<f32>(
-    c0 * invDet,
-    c1 * invDet,
-    c2 * invDet
+    vec3<f32>(row0.x, row1.x, row2.x),
+    vec3<f32>(row0.y, row1.y, row2.y),
+    vec3<f32>(row0.z, row1.z, row2.z)
   );
 }
 

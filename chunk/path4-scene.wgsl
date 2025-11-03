@@ -1,3 +1,6 @@
+// path tracing scene 
+
+//frameごとのカメラ設定
 fn setCamera(
   camPos : ptr<function, vec3<f32>>,
   camTarget : ptr<function, vec3<f32>>,
@@ -7,7 +10,7 @@ fn setCamera(
   let current = (*camPos);
   (*camPos) = vec3<f32>(current.x, current.y + getTime() * 1.0, current.z);
 }
-
+//環境光の設定
 fn environment(ray : Ray) -> vec3<f32> {
   let baseDir = normalize(vec3<f32>(0.5, 1.0, 0.0));
   let t = pow(0.5 * (dot(baseDir, normalize(ray.direction)) + 1.0), 2.0);
@@ -18,14 +21,14 @@ fn environment(ray : Ray) -> vec3<f32> {
 
 fn setupScene(_time : f32) {
 }
-
+//シーンのhit test 
 fn intersectScene(ray : Ray, hit : ptr<function, HitInfo>) {
   let time = getTime();
-
+  //光源判定
   if (trySphere(ray, hit, vec3<f32>(2.0, 6.5, 0.0), 1.0)) {
     (*hit).material = Mat_light(vec3<f32>(4.0, 2.0, 9.0) * 5.65);
   }
-
+  //地面判定
   if (tryGround(ray, hit)) {
     let checkerCoords = (*hit).position.xz * 0.5;
     let checker = modFloat(floor(checkerCoords.x) + floor(checkerCoords.y), 2.0);
@@ -35,28 +38,29 @@ fn intersectScene(ray : Ray, hit : ptr<function, HitInfo>) {
     groundMaterial.albedo = mix(colorA, colorB, checker);
     (*hit).material = groundMaterial;
   }
-
-  if (tryBoundingSphere(ray, hit, vec3<f32>(0.0, 0.0, 0.0), 2.5)) {
+// bounding sphere
+  if (tryBoundingSphere(ray, hit, vec3<f32>(0.0, 0.0, 0.0), 3.)) {
     let centerA = vec3<f32>(sin(time * 0.6) * 2.0, 0.15 + 2.0 * cos(time * 0.4), -1.5);
     let centerB = vec3<f32>(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5));
     let centerC = vec3<f32>(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5);
-
+    //red sphere
     if (trySphere(ray, hit, centerA, 1.0)) {
       (*hit).material = Mat_brdf(vec3<f32>(0.85, 0.3, 0.2), 0.3, 0.7, 1.0);
     }
-
+    // blue sphere
     if (trySphere(ray, hit, centerB, 0.8)) {
       (*hit).material = Mat_mirror(vec3<f32>(0.15, 0.16, 0.5));
     }
-
+    //yellow sphere
     if (trySphere(ray, hit, centerC, 0.6)) {
+      //しましまつける
       if (modFloat(((*hit).position.y - centerC.y) / 0.2, 1.0) < 0.5) {
         (*hit).material = Mat_brdf(vec3<f32>(1.55, 1.5, 0.0), 1.0, 0.0, 1.0);
       } else {
         (*hit).material = Mat_brdf(vec3<f32>(0.0, 1.5, 1.5), 1.0, 0.5, 0.5);
       }
     }
-
+    //spin box 
     let boxSize = vec3<f32>(1.2, 0.9, 0.8);
     let boxSpin = time * 2.6;
     let boxOffset = vec3<f32>(0.0, 0.05, -1.8 + sin(time * 2.0) * 2.0);
