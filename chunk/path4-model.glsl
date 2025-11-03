@@ -57,7 +57,7 @@ mat4 composeTransform(vec3 rotation, vec3 scale, vec3 translation) {
 
 
 // 各オブジェクトとの交差判定
-// in ray,material
+// in ray
 // out hit
 
 // 球体との交差判定
@@ -67,7 +67,6 @@ bool trySphere(
   vec3 center,
   float radius
 ) {
-
   vec3 oc = ray.origin - center;
   float b = dot(oc, ray.direction);
   float c = dot(oc, oc) - radius * radius;
@@ -94,7 +93,6 @@ bool tryBoundingSphere(
   vec3 center,
   float radius
 ) {
-
   vec3 oc = ray.origin - center;
   //boundingで球の中にある場合はtrue
   if (dot(oc, oc) <= radius * radius) {
@@ -111,6 +109,52 @@ bool tryBoundingSphere(
     if (t < 0.001) return false ;
   }
   if (t >= hit.t) return false ;
+  return true ;
+}
+
+// 球体との交差判定（transform対応）
+bool trySphereTransformed(
+  Ray ray,
+  inout HitInfo hit,
+  vec3 center,
+  float radius,
+  mat4 transform 
+) {
+  mat4 invTransform = inverse(transform);
+  Ray localRay = Ray(
+    (invTransform * vec4(ray.origin, 1.0)).xyz,
+    (invTransform * vec4(ray.direction, 0.0)).xyz,
+    0
+  );
+
+  vec3 oc = localRay.origin - center;
+  float b = dot(oc, localRay.direction);
+  float c = dot(oc, oc) - radius * radius;
+  float disc = b * b - c;
+  if (disc < 0.0) return false ;
+  float s = sqrt(disc);
+  float t = -b - s;
+  if (t < 0.001) {
+    t = -b + s;
+    if (t < 0.001) return false ;
+  }
+
+  vec3 localPos = localRay.origin + localRay.direction * t;
+  vec3 localNormal = normalize(localPos - center);
+
+  vec3 worldPos = (transform * vec4(localPos, 1.0)).xyz;
+  float tWorld = dot(worldPos - ray.origin, ray.direction);
+  if (tWorld < 0.001 || tWorld >= hit.t) {
+    return  false ;
+  }
+
+  vec3 worldNormal = normalize(mat3(transpose(invTransform)) * localNormal);
+  if (dot(worldNormal, ray.direction) > 0.0) {
+    worldNormal = -worldNormal;
+  }
+  hit.t = tWorld;
+  hit.position = worldPos;
+  hit.normal = worldNormal;
   return true ;
 }
 
@@ -170,21 +214,15 @@ bool tryBoxTransformed(
   return true ;
 }
 
-void tryGround(Ray ray, Material material, inout HitInfo hit) {
+bool tryGround(Ray ray,inout HitInfo hit) {
   vec3 normal = vec3(0.0, 1.0, 0.0);
   float denom = dot(ray.direction, normal);
-  if (abs(denom) < 0.001) return;
+  if (abs(denom) < 0.001) return false ;
   float t = (-1.0 - ray.origin.y) / denom;
-  if (t < 0.001 || t >= hit.t) return;
+  if (t < 0.001 || t >= hit.t) return false ;
   vec3 pos = ray.origin + ray.direction * t;
-  vec2 checkerCoords = pos.xz * 0.5;
-  float checker = mod(floor(checkerCoords.x) + floor(checkerCoords.y), 2.0);
-  vec3 colorA = vec3(0.85, 0.85, 0.85);
-  vec3 colorB = vec3(0.23, 0.25, 0.28);
-  vec3 albedo = mix(colorA, colorB, checker);
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
-  hit.material = material ;
-  hit.material.albedo = albedo;
+  return true ;
 }
