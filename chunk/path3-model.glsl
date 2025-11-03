@@ -9,20 +9,16 @@ struct ObjParam {
   vec3 size1;
   vec3 size2;
 };
-struct ObjectSOA {
-  bool visible[OBJECT_CAPACITY];
-  int bounding[OBJECT_CAPACITY];
-  int type[OBJECT_CAPACITY];
-  vec3 paramSize1[OBJECT_CAPACITY];
-  vec3 paramSize2[OBJECT_CAPACITY];
-  Material material[OBJECT_CAPACITY];
-  bool useTrans[OBJECT_CAPACITY];
-  mat4 transform[OBJECT_CAPACITY];
-  mat4 invTransform[OBJECT_CAPACITY];
-  mat3 normalMatrix[OBJECT_CAPACITY];
-};
-
-ObjectSOA objects;
+  bool objects_visible[OBJECT_CAPACITY];
+  int objects_bounding[OBJECT_CAPACITY];
+  int objects_type[OBJECT_CAPACITY];
+  vec3 objects_paramSize1[OBJECT_CAPACITY];
+  vec3 objects_paramSize2[OBJECT_CAPACITY];
+  Material objects_material[OBJECT_CAPACITY];
+  bool objects_useTrans[OBJECT_CAPACITY];
+  mat4 objects_transform[OBJECT_CAPACITY];
+  mat4 objects_invTransform[OBJECT_CAPACITY];
+  mat3 objects_normalMatrix[OBJECT_CAPACITY];
 
 // rotation (XYZ, radians), scale, translation -> combined transform matrix
 mat4 composeTransform(vec3 rotation, vec3 scale, vec3 translation) {
@@ -90,28 +86,28 @@ void initObject(
   bool useTransform,
   mat4 transform
 ) {
-  objects.visible[index] = visible;
-  objects.bounding[index] = bounding;
-  objects.type[index] = type;
-  objects.paramSize1[index] = param.size1;
-  objects.paramSize2[index] = param.size2;
-  objects.material[index] = material;
-  objects.transform[index] = transform;
-  objects.useTrans[index] = useTransform;
+  objects_visible[index] = visible;
+  objects_bounding[index] = bounding;
+  objects_type[index] = type;
+  objects_paramSize1[index] = param.size1;
+  objects_paramSize2[index] = param.size2;
+  objects_material[index] = material;
+  objects_transform[index] = transform;
+  objects_useTrans[index] = useTransform;
 
   if (useTransform) {
     float det = determinant(transform);
     if (abs(det) < 1e-6) {
-      objects.useTrans[index] = false;
-      objects.invTransform[index] = m4unit;
-      objects.normalMatrix[index] = mat3(1.0);
+      objects_useTrans[index] = false;
+      objects_invTransform[index] = m4unit;
+      objects_normalMatrix[index] = mat3(1.0);
     } else {
-      objects.invTransform[index] = inverse(transform);
-      objects.normalMatrix[index] = mat3(transpose(objects.invTransform[index]));
+      objects_invTransform[index] = inverse(transform);
+      objects_normalMatrix[index] = mat3(transpose(objects_invTransform[index]));
     }
   } else {
-    objects.invTransform[index] = m4unit;
-    objects.normalMatrix[index] = mat3(1.0);
+    objects_invTransform[index] = m4unit;
+    objects_normalMatrix[index] = mat3(1.0);
   }
 }
 
@@ -125,9 +121,9 @@ bool trySphere(
   Ray ray,
   inout HitInfo hit
 ) {
-  vec3 center = objects.paramSize1[index];
-  float radius = objects.paramSize2[index].x;
-  int bounding = objects.bounding[index];
+  vec3 center = objects_paramSize1[index];
+  float radius = objects_paramSize2[index].x;
+  int bounding = objects_bounding[index];
   vec3 oc = ray.origin - center;
   //boundingで球の中にある場合はtrue
   if (bounding > 0 && dot(oc, oc) <= radius * radius) {
@@ -150,7 +146,7 @@ bool trySphere(
   hit.t = t;
   hit.position = pos;
   hit.normal = normal;
-  hit.material = objects.material[index];
+  hit.material = objects_material[index];
   return true ;
 }
 
@@ -160,21 +156,21 @@ bool trySphereTransformed(
   Ray ray,
   inout HitInfo hit
 ) {
-  if (!objects.useTrans[index]) {
+  if (!objects_useTrans[index]) {
     return trySphere(index, ray, hit);
   }
 
-  mat4 transform = objects.transform[index];
-  mat4 invTransform = objects.invTransform[index];
+  mat4 transform = objects_transform[index];
+  mat4 invTransform = objects_invTransform[index];
   Ray localRay = Ray(
     (invTransform * vec4(ray.origin, 1.0)).xyz,
     (invTransform * vec4(ray.direction, 0.0)).xyz,
     0
   );
 
-  vec3 center = objects.paramSize1[index];
-  float radius = objects.paramSize2[index].x;
-  int bounding = objects.bounding[index];
+  vec3 center = objects_paramSize1[index];
+  float radius = objects_paramSize2[index].x;
+  int bounding = objects_bounding[index];
 
   vec3 oc = localRay.origin - center;
   //boundingで球の中にある場合はtrue
@@ -201,7 +197,7 @@ bool trySphereTransformed(
     return  false ;
   }
 
-  vec3 worldNormal = normalize(objects.normalMatrix[index] * localNormal);
+  vec3 worldNormal = normalize(objects_normalMatrix[index] * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
@@ -209,7 +205,7 @@ bool trySphereTransformed(
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.material = objects.material[index];
+  hit.material = objects_material[index];
   return true ;
 }
 
@@ -218,11 +214,11 @@ bool tryBoxTransformed(
   Ray ray,
   inout HitInfo hit
 ) {
-  vec3 size = objects.paramSize1[index];
-  mat4 transform = objects.transform[index];
-  mat4 invTransform = objects.invTransform[index];
-  int bounding = objects.bounding[index];
-  bool isTransformed = objects.useTrans[index];
+  vec3 size = objects_paramSize1[index];
+  mat4 transform = objects_transform[index];
+  mat4 invTransform = objects_invTransform[index];
+  int bounding = objects_bounding[index];
+  bool isTransformed = objects_useTrans[index];
 
   if (!isTransformed) {
     transform = m4unit;
@@ -274,7 +270,7 @@ bool tryBoxTransformed(
   }
   if (bounding > 0) return true;
 
-  vec3 worldNormal = normalize(objects.normalMatrix[index] * localNormal);
+  vec3 worldNormal = normalize(objects_normalMatrix[index] * localNormal);
   if (dot(worldNormal, ray.direction) > 0.0) {
     worldNormal = -worldNormal;
   }
@@ -282,7 +278,7 @@ bool tryBoxTransformed(
   hit.t = tWorld;
   hit.position = worldPos;
   hit.normal = worldNormal;
-  hit.material = objects.material[index];
+  hit.material = objects_material[index];
   return true ;
 }
 
