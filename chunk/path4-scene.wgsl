@@ -54,10 +54,11 @@ fn intersectScene(ray : Ray, hit : ptr<function, HitInfo>) {
     //yellow sphere
     if (trySphere(ray, hit, centerC, 0.6)) {
       //しましまつける
-      if (modFloat(((*hit).position.y - centerC.y) / 0.2, 1.0) < 0.5) {
+      let lpos = ((*hit).position.y - centerC.y) ;
+      if (modFloat( lpos / 0.2, 1.0) < 0.5) {
         (*hit).material = Mat_brdf(vec3<f32>(1.55, 1.5, 0.0), 1.0, 0.0, 1.0);
       } else {
-        (*hit).material = Mat_brdf(vec3<f32>(0.0, 1.5, 1.5), 1.0, 0.5, 0.5);
+        (*hit).material = Mat_brdf(vec3<f32>(0.0, 1.5, 1.5), 0.5, 0.5, 1.);
       }
     }
     //spin box 

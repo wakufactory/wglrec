@@ -4,9 +4,9 @@ export {createSceneController} from './shader_modgpu.js?' ;
 //settings
 globalThis.shader_settings = {
   SETTINGS:`
-    const MAX_BOUNCES : i32 = 4;
+    const MAX_BOUNCES : i32 = 6;
     const SPP : i32 = 4;
-    const STEREO : f32 = 0.;        // stereo ipd
+    const STEREO : f32 = 0.4;        // stereo ipd
     const STEREO_TARGET : bool = true; // stereo target
     const RANDOM_SEED : i32 = 1 ; //random noize seed par frame
   `,

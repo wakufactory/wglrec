@@ -25,12 +25,12 @@ export async function createSceneController({ canvas, width, height, log }) {
   let currentHeight = clampDimension(height);
 
   configureContext(context, canvas, device, format, currentWidth, currentHeight);
+  const detachDeviceErrorLogger = attachDeviceErrorLogger(device, log);
 
   const shaderSource = await loadShaderSources();
   const shaderModule = device.createShaderModule({ code: shaderSource });
-  await reportShaderCompilationMessages(shaderModule, log);
 
-  const pipeline = device.createRenderPipeline({
+  const pipelineDescriptor = {
     layout: 'auto',
     vertex: {
       module: shaderModule,
@@ -42,7 +42,61 @@ export async function createSceneController({ canvas, width, height, log }) {
       targets: [{ format }]
     },
     primitive: { topology: 'triangle-list' }
-  });
+  };
+
+  let pipeline;
+  const hasErrorScopes = typeof device.pushErrorScope === 'function' && typeof device.popErrorScope === 'function';
+  if (hasErrorScopes) {
+    device.pushErrorScope('validation');
+    device.pushErrorScope('internal');
+  }
+  let validationError = null;
+  let internalError = null;
+  try {
+    if (typeof device.createRenderPipelineAsync === 'function') {
+      pipeline = await device.createRenderPipelineAsync(pipelineDescriptor);
+    } else {
+      pipeline = device.createRenderPipeline(pipelineDescriptor);
+    }
+  } catch (pipelineError) {
+    if (hasErrorScopes) {
+      try {
+        internalError = await device.popErrorScope();
+      } catch (_) {}
+      try {
+        validationError = await device.popErrorScope();
+      } catch (_) {}
+    }
+    // Attempt to surface WGSL compiler diagnostics before rethrowing.
+    await reportShaderCompilationMessages(shaderModule, log, { suppressThrow: true });
+    if (typeof log === 'function') {
+      const reason = pipelineError?.message || pipelineError;
+      log(`[webgpu] Failed to create render pipeline: ${reason}`);
+    }
+    for (const error of [internalError, validationError]) {
+      if (error && typeof log === 'function') {
+        log(`[webgpu validation] ${error.message || error}`);
+      }
+    }
+    throw pipelineError;
+  }
+  if (hasErrorScopes) {
+    try {
+      internalError = await device.popErrorScope();
+    } catch (_) {}
+    try {
+      validationError = await device.popErrorScope();
+    } catch (_) {}
+    const scopedMessages = [internalError, validationError].filter(Boolean);
+    if (scopedMessages.length && typeof log === 'function') {
+      for (const error of scopedMessages) {
+        const message = error?.message || error;
+        log(`[webgpu validation] ${message}`);
+      }
+    }
+  }
+
+  await reportShaderCompilationMessages(shaderModule, log);
 
   const uniformValues = new Float32Array(UNIFORM_FLOAT_COUNT);
   let uniformDirty = true;
@@ -135,6 +189,7 @@ export async function createSceneController({ canvas, width, height, log }) {
 
     dispose() {
       uniformBuffer.destroy();
+      detachDeviceErrorLogger?.();
     }
   };
 
@@ -205,7 +260,8 @@ export async function createSceneController({ canvas, width, height, log }) {
   }
 }
 
-async function reportShaderCompilationMessages(shaderModule, log) {
+async function reportShaderCompilationMessages(shaderModule, log, options = {}) {
+  const { suppressThrow = false } = options ?? {};
   const hasLogger = typeof log === 'function';
   if (!shaderModule?.compilationInfo) {
     return;
@@ -216,6 +272,11 @@ async function reportShaderCompilationMessages(shaderModule, log) {
   } catch (err) {
     if (hasLogger) {
       log(`[wgsl] Failed to inspect compilation info: ${err?.message || err}`);
+    } else {
+      console.error('[wgsl] Failed to inspect compilation info', err);
+    }
+    if (suppressThrow) {
+      return;
     }
     throw err;
   }
@@ -237,6 +298,11 @@ async function reportShaderCompilationMessages(shaderModule, log) {
       const detail = msg.message || 'WGSL compilation error';
       log(`${prefix}${formatLocation(msg)} ${detail}`.trim());
     }
+  } else {
+    console.error('[wgsl] compilation failed', errors);
+  }
+  if (suppressThrow) {
+    return errors;
   }
   throw new Error('WGSL shader compilation failed; see log output for details.');
 }
@@ -259,4 +325,27 @@ function clampDimension(value) {
     return 1;
   }
   return Math.max(1, Math.floor(n));
+}
+
+function attachDeviceErrorLogger(device, log) {
+  if (!device || typeof device.addEventListener !== 'function') {
+    return null;
+  }
+  const handler = (event) => {
+    const error = event?.error;
+    const message = error?.message || error;
+    if (typeof log === 'function') {
+      log(`[webgpu uncaptured] ${message}`);
+    } else {
+      console.error('[webgpu uncaptured error]', error);
+    }
+  };
+  device.addEventListener('uncapturederror', handler);
+  return () => {
+    try {
+      device.removeEventListener('uncapturederror', handler);
+    } catch (_) {
+      // Ignore cleanup errors; device may already be lost.
+    }
+  };
 }
