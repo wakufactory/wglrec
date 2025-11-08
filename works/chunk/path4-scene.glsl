@@ -37,7 +37,7 @@ void intersectScene(Ray ray, inout HitInfo hit) {
     hit.material = gmaterial ;
   };
   // bounding sphere
-  if(tryBoundingSphere(ray,hit,vec3(0.,0.,0.),2.5)) {
+  if(tryBoundingSphere(ray,hit,vec3(0.,0.,0.),3.)) {
     vec3 centerA = vec3(sin(time * 0.6) * 2.0, 0.15 + 2.0 * cos(time * 0.4), -1.5);
     vec3 centerB = vec3(-1.4 + 0.5 * sin(time * 0.8), -0.2, -0.2 + 1.0 * cos(time * 0.5));
     vec3 centerC = vec3(1.5 + 0.3 * sin(time * 0.7), 0.2 + 0.25 * sin(time * 0.9 + 1.0), -0.5);
