@@ -9,7 +9,7 @@ const SHADER_CHUNK_FILES = [
   'path1-scene.glsl'
 ];
 //settings
-const stereo = 0.5; // if not zero, stereo rendering IPD
+const stereo = 0.; // if not zero, stereo rendering IPD
 
 export async function createSceneController({ canvas, width, height, log }) {
   const gl = canvas.getContext('webgl2', {
