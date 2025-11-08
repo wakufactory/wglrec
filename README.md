@@ -45,6 +45,8 @@ export async function createSceneController({
 - `shader-path.js` : フルスクリーンパストレーシングの例。
 - `scene-canvas.js` : 2D Canvas API だけで実装した軽量サンプル。
 - `shader-chunk.js` ; シェーダのglslファイルをダイナミックロードするもの
+- `webgpu-template.js` : webgpuシェーダーサンプル
+- `webgpu-chunk.js` ; シェーダのglslファイルをダイナミックロードするwebgpu版
 
 `scene-canvas.js`  は WebGL に依存せず、OffscreenCanvas の 2D コンテキストを活用する例です。
 

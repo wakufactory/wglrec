@@ -96,7 +96,7 @@
   let renderStartTime = 0;
   let renderLastFrameCount = 0;
   function log(...args){
-    console.log(...args);
+ //   console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
     logEl.scrollTop = logEl.scrollHeight;
   }
@@ -233,6 +233,7 @@
       log(ev.data.message);
     } else if (type === 'error') {
       log('ERROR:', ev.data.message);
+      //ERROR: OperationError: A valid external Instance reference no longer exists. CONTEXT LOST
       btnRender.disabled = false;
       btnCancelRender.disabled = true;
       renderInFlight = false;

@@ -98,6 +98,7 @@ async function handleInit({ canvas: initCanvas, sceneModule }) {
   }
   width = canvas.width;
   height = canvas.height;
+  log('Worker initialization started.');
   await initScene(sceneModule);
   ready = true;
   log('Worker initialized.');
