@@ -1,5 +1,5 @@
-const MAX_BOUNCES : i32 = 4;
-const SPP : i32 = 4;
+const MAX_BOUNCES : i32 = 6;
+const SPP : i32 = 20;
 const HIDDEN_LIGHT : i32 = 0;
 
 const MATERIAL_NONE : i32 = -1;
