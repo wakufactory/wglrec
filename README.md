@@ -9,7 +9,7 @@ Three.js など任意のシーンモジュールを Web Worker 上でオフラ�
 - ログフィードで進捗やエラーメッセージを確認可能。
 
 ## 動作要件
-- WebCodecs と OffscreenCanvas に対応した最新の Chromium 系ブラウザ。
+- WebCodecs と OffscreenCanvas に対応した最新のブラウザ。MacのChrome,safari,WinのChrome,Edgeでの動作は確認しています。
 - CDN からシーンが必要とするライブラリ（例: three.js r159+）と `webm-muxer` を読み込める環境。
 - モジュールワーカーが利用可能であること。
 
