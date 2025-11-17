@@ -40,6 +40,7 @@ const log = (m) => {
   postMessage({ type:'log', message: String(m) });
 };
 
+// モジュール再読み込み用にキャッシュバスター付きURLを生成する
 function createCacheBustedModuleUrl(baseUrl) {
   // Append a short-lived token so module re-imports bypass the browser cache.
   const source = (baseUrl || '').trim();
@@ -90,6 +91,7 @@ self.onmessage = async (ev) => {
   }
 };
 
+// メインスレッドから渡された初期化情報を受け取り、シーンと状態を整える
 async function handleInit({ canvas: initCanvas, sceneModule }) {
   initialCanvas = initCanvas;
   canvas = initialCanvas;
@@ -110,10 +112,12 @@ async function handleInit({ canvas: initCanvas, sceneModule }) {
   });
 }
 
+// UIからのリサイズ指示を受けてキャンバス寸法を更新する
 function handleResize({ width: nextWidth, height: nextHeight }) {
   applyResize(nextWidth, nextHeight);
 }
 
+// 指定秒数のプレビューフレームを描画してメインへ送る
 async function handlePreview({ timeSec, fps: requestedFps }) {
   ensureReady();
   const t = Math.max(0, Number(timeSec) || 0);
@@ -123,6 +127,7 @@ async function handlePreview({ timeSec, fps: requestedFps }) {
   await emitPreview(t, 'ui');
 }
 
+// エンコード付きの本番レンダリング要求を処理する
 async function handleRender({ totalFrames, fps: requestedFps, bitrate: requestedBitrate, keyframeIntervalSec: requestedInterval, startSec, endSec }) {
   ensureReady();
   if (isRendering) {
@@ -165,6 +170,7 @@ async function handleRender({ totalFrames, fps: requestedFps, bitrate: requested
   }
 }
 
+// 別のシーンモジュールを再読み込みしてプレビューを更新する
 async function handleLoadScene({ module, timeSec }) {
   ensureReady();
   const modulePath = typeof module === 'string' ? module : null;
@@ -176,6 +182,7 @@ async function handleLoadScene({ module, timeSec }) {
   await emitPreview(previewTime, 'scene-reload');
 }
 
+// 実行中レンダリングにキャンセルフラグを立てる
 function handleCancelRender() {
   if (!isRendering) {
     log('Cancel request ignored: no active render.');
@@ -185,6 +192,7 @@ function handleCancelRender() {
   cancelRequested = true;
 }
 
+// キャンバスとシーンに対して実際のリサイズ処理を行う
 function applyResize(nextWidth, nextHeight) {
   const parsedWidth = Number(nextWidth);
   const parsedHeight = Number(nextHeight);
@@ -206,6 +214,7 @@ function applyResize(nextWidth, nextHeight) {
 }
 
 // ====== シーン初期化 ======
+// 指定されたシーンモジュールを動的に読み込み初期化する
 async function initScene(modulePath){
   await sceneInitLock;
   let releaseLock = () => {};
@@ -267,17 +276,13 @@ async function initScene(modulePath){
   }
 }
 
-// 任意時刻 t（秒）で1フレームだけ描画
+// 任意時刻 t（秒）のフレームをタイル描画でレンダリングする
 async function renderAtTime(tSec){
-  await waitForSceneInitialization();
-  if (typeof renderFrame !== 'function') {
-    throw new Error('Scene render function not configured');
-  }
-  await renderFrame(tSec);
-  await waitForGpu();
+  await renderFrameWithViewportGrid(tSec);
 }
 
 // ====== オフライン 1フレームずつ → WebCodecs へ投入 ======
+// 連続フレームを描画しつつWebCodecsでエンコードする
 async function renderAndEncode({ totalFrames, startSec, endSec }){
   await waitForSceneInitialization();
   if (typeof renderFrame !== 'function') {
@@ -344,8 +349,7 @@ async function renderAndEncode({ totalFrames, startSec, endSec }){
       abortIfNeeded();
       const t = baseTime + i / fps;          // レンジ開始からの決定的な理想時刻
       const clampedT = Math.min(t, endTime);
-      await renderFrame(clampedT);             // シーンを clampedT 秒でレンダ
-      await waitForGpu();
+      await renderFrameWithViewportGrid(clampedT, { abortCheck: abortIfNeeded });
       abortIfNeeded();
       await emitPreview(clampedT, 'render');
       abortIfNeeded();
@@ -383,6 +387,32 @@ async function renderAndEncode({ totalFrames, startSec, endSec }){
   }
 }
 
+// ビューポートをタイル状に分割し、各ブロックを順番に描画する共通ループ
+async function renderFrameWithViewportGrid(timeSec, options = {}){
+  await waitForSceneInitialization();
+  if (typeof renderFrame !== 'function') {
+    throw new Error('Scene render function not configured');
+  }
+
+  const { abortCheck } = options ?? {};
+  const grid = await resolveViewportGridDescriptor();
+  const totalBlocks = Math.max(1, Number(grid?.totalBlocks) || (grid.columns * grid.rows));
+
+  for (let blockIndex = 0; blockIndex < totalBlocks; blockIndex++) {
+    if (typeof abortCheck === 'function') {
+      abortCheck();
+    }
+    const block = describeViewportBlock(blockIndex, grid, width, height);
+    await renderFrame(timeSec, block);
+    await waitForGpu();
+    log(`block ${block.index + 1}/${totalBlocks} (${block.width}x${block.height}@${block.offsetX},${block.offsetY}) rendered at t=${timeSec.toFixed?.(3) ?? timeSec}`);
+    if (typeof abortCheck === 'function') {
+      abortCheck();
+    }
+  }
+}
+
+// キャンセル検出時に投げる AbortError を生成する
 function createAbortError(){
   try {
     return new DOMException('Render cancelled', 'AbortError');
@@ -393,6 +423,7 @@ function createAbortError(){
   }
 }
 
+// エンコード途中でエラーになった際に関連リソースを解放する
 function resetEncodingPipeline(){
   if (encoder) {
     try { encoder.close(); } catch (_) { /* ignore */ }
@@ -402,8 +433,11 @@ function resetEncodingPipeline(){
   muxTarget = null;
 }
 
+// 指定ミリ秒だけ待つシンプルな遅延ユーティリティ
 function nap(ms = 0){ return new Promise(r => setTimeout(r, ms)); }
+// 初期化が完了しているかを確認し、未準備なら例外を投げる
 function ensureReady(){ if (!ready) throw new Error('Worker not initialized'); }
+// GPU側の処理完了を同期的に待ち合わせる
 async function waitForGpu(){
   if (typeof sceneController?.waitForGpu === 'function') {
     await sceneController.waitForGpu();
@@ -426,6 +460,7 @@ async function waitForGpu(){
   gl.commit?.();
 }
 
+// 現在のキャンバス内容を ImageBitmap として取得する
 async function captureBitmap(){
   await waitForSceneInitialization();
   if (!canvas) {
@@ -438,11 +473,13 @@ async function captureBitmap(){
   return await createImageBitmap(canvas);
 }
 
+// プレビュー画像をメインスレッドに転送する
 async function emitPreview(timeSec, origin = 'render'){
   const bmp = await captureBitmap();
   postMessage({ type:'preview', bitmap: bmp, timeSec, width, height, origin }, [bmp]);
 }
 
+// シーンコントローラから WebGL コンテキストを特定して返す
 function resolveRenderContext(controller){
   try {
     if (!controller) return null;
@@ -483,6 +520,7 @@ function resolveRenderContext(controller){
   }
 }
 
+// 利用可能な描画コンテキストを確保しキャッシュする
 async function getRenderableContext(){
   if (!renderContext) {
     const ctx = resolveRenderContext(sceneController);
@@ -493,6 +531,7 @@ async function getRenderableContext(){
   return renderContext;
 }
 
+// 現在のシーンやレンダラーを破棄しリソースを解放する
 function destroyCurrentScene(){
   const prevController = sceneController;
   const prevRenderer = renderer;
@@ -521,6 +560,7 @@ function destroyCurrentScene(){
   releaseWebGLContext(prevContext);
 }
 
+// レンダリングに利用するキャンバスを確保する
 function createRenderingCanvas(targetWidth, targetHeight){
   const desiredWidth = clampDimension(targetWidth);
   const desiredHeight = clampDimension(targetHeight);
@@ -555,6 +595,7 @@ function createRenderingCanvas(targetWidth, targetHeight){
   throw new Error('Rendering canvas allocation failed: OffscreenCanvas unavailable');
 }
 
+// WEBGL_lose_context 拡張を使ってコンテキストを解放する
 function releaseWebGLContext(gl){
   if (!gl || typeof gl.getExtension !== 'function') return;
   try {
@@ -569,12 +610,97 @@ function releaseWebGLContext(gl){
   }
 }
 
+// シーン側が公開するビューポート分割数を取得し、標準化したディスクリプタを返す
+async function resolveViewportGridDescriptor(){
+  const fallback = { columns: 1, rows: 1, totalBlocks: 1 };
+  if (!sceneController) {
+    return fallback;
+  }
+  try {
+    const raw = typeof sceneController.getViewportGrid === 'function'
+      ? await sceneController.getViewportGrid()
+      : sceneController.viewportGrid;
+    return normalizeViewportGridDescriptor(raw);
+  } catch (err) {
+    log(`resolveViewportGrid failed: ${err?.message || err}`);
+    return fallback;
+  }
+}
+
+// グリッド情報を安全な列・行数に正規化する
+function normalizeViewportGridDescriptor(raw){
+  const columns = clampGridDimension(raw?.columns ?? raw?.cols ?? raw?.x ?? raw?.width ?? 1);
+  const rows = clampGridDimension(raw?.rows ?? raw?.lines ?? raw?.y ?? raw?.height ?? 1);
+  const totalBlocks = Math.max(1, columns * rows);
+  return { columns, rows, totalBlocks };
+}
+
+// 指定インデックスのブロック領域を算出して返す
+function describeViewportBlock(index, grid, canvasWidth, canvasHeight){
+  const columns = clampGridDimension(grid?.columns ?? 1);
+  const rows = clampGridDimension(grid?.rows ?? 1);
+  const totalBlocks = Math.max(1, columns * rows);
+  const cappedIndex = Math.min(totalBlocks - 1, Math.max(0, Math.floor(index)));
+  const column = cappedIndex % columns;
+  const row = Math.floor(cappedIndex / columns);
+  const sliceX = computeViewportSlice(canvasWidth, columns, column);
+  const sliceY = computeViewportSlice(canvasHeight, rows, row);
+  return {
+    index: cappedIndex,
+    columns,
+    rows,
+    totalBlocks,
+    column,
+    row,
+    isFirst: cappedIndex === 0,
+    isLast: cappedIndex === totalBlocks - 1,
+    offsetX: sliceX.start,
+    offsetY: sliceY.start,
+    width: sliceX.size,
+    height: sliceY.size,
+    scissorX: sliceX.start,
+    scissorY: sliceY.start,
+    scissorWidth: sliceX.size,
+    scissorHeight: sliceY.size,
+    canvasWidth,
+    canvasHeight
+  };
+}
+
+// 全長と分割数から対象セグメントの範囲を求める
+function computeViewportSlice(fullLength, segments, segmentIndex){
+  const safeLength = Math.max(1, Math.floor(fullLength));
+  const safeSegments = Math.max(1, Math.floor(segments));
+  const clampedIndex = Math.min(safeSegments - 1, Math.max(0, Math.floor(segmentIndex)));
+  const start = Math.floor((clampedIndex * safeLength) / safeSegments);
+  const rawEnd = clampedIndex === safeSegments - 1
+    ? safeLength
+    : Math.floor(((clampedIndex + 1) * safeLength) / safeSegments);
+  const end = Math.max(start + 1, rawEnd);
+  return {
+    start,
+    end,
+    size: end - start
+  };
+}
+
+// ビューポート分割数を1以上の整数に丸める
+function clampGridDimension(value){
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 1) {
+    return 1;
+  }
+  return Math.floor(num);
+}
+
+// ピクセル寸法を1以上の整数値に丸める
 function clampDimension(value){
   const num = Number.isFinite(value) ? value : 1;
   const clamped = Math.max(1, num);
   return Math.floor(clamped);
 }
 
+// シーン初期化が完了するまで待機する
 async function waitForSceneInitialization(){
   // Wait for any in-flight scene initialization to settle before proceeding.
   while (true) {
