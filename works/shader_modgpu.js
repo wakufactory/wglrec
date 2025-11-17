@@ -193,7 +193,7 @@ export async function createSceneController({ canvas, width, height, log }) {
           viewport.scissorHeight
         );
       }
-      pass.draw(3, 1, 0, 0);
+      pass.draw(3, 1, 0, 0);  //fullscreen triangle
 
       pass.end();
       let submitted = false;
@@ -288,16 +288,16 @@ export async function createSceneController({ canvas, width, height, log }) {
   // ユニフォームバッファ全体を既定値で初期化する
   function initializeUniforms(buffer, widthPx, heightPx) {
     buffer.fill(0);
-    buffer[8] = 0.0;
+    buffer[8] = 0.0;  //camPos
     buffer[9] = 0.5;
     buffer[10] = 4.0;
-    buffer[12] = 0.0;
+    buffer[12] = 0.0; //camTarget
     buffer[13] = -0.1;
     buffer[14] = -1.0;
-    buffer[16] = 0.0;
+    buffer[16] = 0.0; //camUp
     buffer[17] = 1.0;
     buffer[18] = 0.0;
-    buffer[20] = 45.0;
+    buffer[20] = 45.0;  //camFov
     updateResolution(widthPx, heightPx);
   }
 
