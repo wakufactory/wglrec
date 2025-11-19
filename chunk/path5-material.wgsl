@@ -1,46 +1,5 @@
-struct Material {
-  albedo : vec3<f32>,
-  emission : vec3<f32>,
-  specular : vec3<f32>,
-  roughness : f32,
-  metalness : f32,
-  ior : f32,
-  kind : i32,
-};
+// path tracing material 
 
-struct HitInfo {
-  t : f32,
-  position : vec3<f32>,
-  normal : vec3<f32>,
-  material : Material,
-};
-
-struct CookTorranceSample {
-  direction : vec3<f32>,
-  weight : vec3<f32>,
-  pdf : f32,
-};
-
-fn defaultMaterial() -> Material {
-  return Material(
-    vec3<f32>(0.0),
-    vec3<f32>(0.0),
-    vec3<f32>(0.0),
-    1.0,
-    0.0,
-    1.5,
-    MATERIAL_NONE
-  );
-}
-
-fn defaultHitInfo() -> HitInfo {
-  return HitInfo(
-    1e20,
-    vec3<f32>(0.0),
-    vec3<f32>(0.0),
-    defaultMaterial()
-  );
-}
 
 fn Mat_none() -> Material {
   return defaultMaterial();
@@ -48,6 +7,7 @@ fn Mat_none() -> Material {
 
 fn Mat_lambert(color : vec3<f32>) -> Material {
   return Material(
+    false,
     color,
     vec3<f32>(0.0),
     vec3<f32>(0.0),
@@ -60,6 +20,7 @@ fn Mat_lambert(color : vec3<f32>) -> Material {
 
 fn Mat_brdf(color : vec3<f32>, roughness : f32, metalness : f32, ior : f32) -> Material {
   return Material(
+    false,
     color,
     vec3<f32>(0.0),
     vec3<f32>(0.0),
@@ -72,6 +33,7 @@ fn Mat_brdf(color : vec3<f32>, roughness : f32, metalness : f32, ior : f32) -> M
 
 fn Mat_mirror(color : vec3<f32>) -> Material {
   return Material(
+    false,
     color,
     vec3<f32>(0.0),
     vec3<f32>(0.0),
@@ -84,6 +46,7 @@ fn Mat_mirror(color : vec3<f32>) -> Material {
 
 fn Mat_trans(color : vec3<f32>, refColor : vec3<f32>, ior : f32) -> Material {
   return Material(
+    false,
     color,
     vec3<f32>(0.0),
     refColor,
@@ -96,6 +59,7 @@ fn Mat_trans(color : vec3<f32>, refColor : vec3<f32>, ior : f32) -> Material {
 
 fn Mat_light(color : vec3<f32>) -> Material {
   return Material(
+    true,
     vec3<f32>(0.0),
     color,
     vec3<f32>(0.0),
@@ -200,6 +164,15 @@ fn ct_ComputeF0(baseColor : vec3<f32>, metallic : f32, ior : f32) -> vec3<f32> {
   return mix(dielectric, baseColor, clamp(metallic, 0.0, 1.0));
 }
 
+
+struct CookTorranceSample {
+  direction : vec3<f32>,
+  weight : vec3<f32>,
+  pdf : f32,
+};
+
+
+
 fn ct_EvalCookTorrance(
   baseColor : vec3<f32>,
   metallic : f32,
@@ -286,6 +259,7 @@ fn sampleCookTorranceBRDF(mat : Material, N : vec3<f32>, V : vec3<f32>, seed : p
   return result;
 }
 
+// calc Ray reflection
 fn updateRay(
   bounce : i32,
   hit : HitInfo,

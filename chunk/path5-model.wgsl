@@ -1,3 +1,5 @@
+// path tracing model
+
 fn composeTransform(rotation : vec3<f32>, scale : vec3<f32>, translation : vec3<f32>) -> mat4x4<f32> {
   var mat = mat4x4<f32>(
     vec4<f32>(1.0, 0.0, 0.0, 0.0),
@@ -78,7 +80,7 @@ fn inverseMat3(m : mat3x3<f32>) -> mat3x3<f32> {
   );
 }
 
-fn trySphere(ray : Ray, hit : ptr<function, HitInfo>, center : vec3<f32>, radius : f32) -> bool {
+fn trySphere(id : u32, ray : Ray, hit : ptr<function, HitInfo>, center : vec3<f32>, radius : f32) -> bool {
   let oc = ray.origin - center;
   let b = dot(oc, ray.direction);
   let c = dot(oc, oc) - radius * radius;
@@ -102,6 +104,8 @@ fn trySphere(ray : Ray, hit : ptr<function, HitInfo>, center : vec3<f32>, radius
   (*hit).t = t;
   (*hit).position = pos;
   (*hit).normal = normal;
+  (*hit).localPosition = pos - center ;
+  (*hit).id = id ;
   return true;
 }
 
@@ -132,6 +136,7 @@ fn tryBoundingSphere(ray : Ray, hit : ptr<function, HitInfo>, center : vec3<f32>
 }
 
 fn trySphereTransformed(
+  id :u32,
   ray : Ray,
   hit : ptr<function, HitInfo>,
   center : vec3<f32>,
@@ -183,10 +188,13 @@ fn trySphereTransformed(
   (*hit).t = tWorld;
   (*hit).position = worldPos;
   (*hit).normal = worldNormal;
+  (*hit).localPosition = localPos ;
+  (*hit).id = id ;
   return true;
 }
 
 fn tryBoxTransformed(
+  id : u32,
   ray : Ray,
   hit : ptr<function, HitInfo>,
   size : vec3<f32>,
@@ -251,10 +259,12 @@ fn tryBoxTransformed(
   (*hit).t = tWorld;
   (*hit).position = worldPos;
   (*hit).normal = worldNormal;
+  (*hit).localPosition = localPos ;
+  (*hit).id = id ;
   return true;
 }
 
-fn tryGround(ray : Ray, hit : ptr<function, HitInfo>) -> bool {
+fn tryGround(id : u32, ray : Ray, hit : ptr<function, HitInfo>) -> bool {
   let normal = vec3<f32>(0.0, 1.0, 0.0);
   let denom = dot(ray.direction, normal);
   if (abs(denom) < 0.001) {
@@ -268,5 +278,6 @@ fn tryGround(ray : Ray, hit : ptr<function, HitInfo>) -> bool {
   (*hit).t = t;
   (*hit).position = pos;
   (*hit).normal = normal;
+  (*hit).id = id ;
   return true;
 }

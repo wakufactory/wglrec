@@ -1,3 +1,6 @@
+// path tracing main
+
+// ray tracer 
 fn traceRay(initialRay : Ray, seed : ptr<function, u32>) -> vec3<f32> {
   var ray = initialRay;
   var throughput = vec3<f32>(1.0, 1.0, 1.0);
@@ -7,13 +10,8 @@ fn traceRay(initialRay : Ray, seed : ptr<function, u32>) -> vec3<f32> {
     var hit = defaultHitInfo();
     intersectScene(ray, &hit);
 
-    if (hit.material.kind == MATERIAL_NONE) {
-      radiance = radiance + throughput * environment(ray);
-      break;
-    }
-
     radiance = radiance + throughput * hit.material.emission;
-    if (hit.material.kind == MATERIAL_LIGHT) {
+    if (hit.material.noref) {
       break;
     }
 
@@ -26,6 +24,7 @@ fn traceRay(initialRay : Ray, seed : ptr<function, u32>) -> vec3<f32> {
   return radiance;
 }
 
+// vshader
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<f32> {
   let positions = array<vec2<f32>, 3>(
@@ -36,6 +35,7 @@ fn vs_main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<
   return vec4<f32>(positions[vertexIndex], 0.0, 1.0);
 }
 
+// fshader main
 @fragment
 fn fs_main(@builtin(position) fragCoord : vec4<f32>) -> @location(0) vec4<f32> {
   var pixel = fragCoord.xy;

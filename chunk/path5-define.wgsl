@@ -1,3 +1,5 @@
+// path tracer definition
+
 struct SceneUniforms {
   timeStereoAspect : vec4<f32>,
   resolution : vec4<f32>,
@@ -30,6 +32,50 @@ struct Basis {
   tangent : vec3<f32>,
   bitangent : vec3<f32>,
 };
+
+struct Material {
+  noref: bool,
+  albedo : vec3<f32>,
+  emission : vec3<f32>,
+  specular : vec3<f32>,
+  roughness : f32,
+  metalness : f32,
+  ior : f32,
+  kind : i32,
+};
+
+struct HitInfo {
+  id : u32,
+  t : f32,
+  position : vec3<f32>,
+  normal : vec3<f32>,
+  material : Material,
+  localPosition : vec3<f32>
+};
+
+fn defaultMaterial() -> Material {
+  return Material(
+    true,
+    vec3<f32>(0.0),
+    vec3<f32>(0.0),
+    vec3<f32>(0.0),
+    1.0,
+    0.0,
+    1.5,
+    MATERIAL_NONE
+  );
+}
+
+fn defaultHitInfo() -> HitInfo {
+  return HitInfo(
+    0,
+    1e20,
+    vec3<f32>(0.0),
+    vec3<f32>(0.0),
+    defaultMaterial(),
+    vec3<f32>(0.0)
+  );
+}
 
 fn makeRay(origin : vec3<f32>, direction : vec3<f32>, kind : i32) -> Ray {
   return Ray(origin, direction, kind);
