@@ -60,6 +60,7 @@
   <div id="renderStats" style="margin-top:8px;display:flex;flex-direction:row;gap:4px;">
     <span>elapsed: <strong id="renderElapsed">0.00</strong> sec</span>
     <span>frame/sec: <strong id="renderFps">0.00</strong></span>
+    <span>eta: <strong id="renderEta">--</strong> min</span>
   </div>
 </fieldset>
 
@@ -91,28 +92,38 @@
   const btnReloadScene = document.getElementById('btnReloadScene');
   const renderElapsedEl = document.getElementById('renderElapsed');
   const renderFpsEl = document.getElementById('renderFps');
+  const renderEtaEl = document.getElementById('renderEta');
   let renderInFlight = false;
   let workerReady = false;
   let renderStartTime = 0;
   let renderLastFrameCount = 0;
+  let renderTotalFrames = 0;
   function log(...args){
  //   console.log(...args);
     logEl.textContent += args.join(' ') + '\n';
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  function setRenderEtaText(text){
+    if (renderEtaEl) {
+      renderEtaEl.textContent = text;
+    }
+  }
+
   function resetRenderStats(){
     renderStartTime = 0;
     renderLastFrameCount = 0;
+    renderTotalFrames = 0;
     if (renderElapsedEl) {
       renderElapsedEl.textContent = '0.00';
     }
     if (renderFpsEl) {
       renderFpsEl.textContent = '0.00';
     }
+    setRenderEtaText('--');
   }
 
-  function updateRenderStats(doneFrames){
+  function updateRenderStats(doneFrames, totalFrames = renderTotalFrames){
     if (!renderElapsedEl || !renderFpsEl) {
       return;
     }
@@ -124,6 +135,10 @@
     renderElapsedEl.textContent = elapsedSec.toFixed(2);
     renderFpsEl.textContent = fps.toFixed(2);
     renderLastFrameCount = doneFrames;
+    if (Number.isFinite(totalFrames) && totalFrames > 0) {
+      renderTotalFrames = totalFrames;
+    }
+    updateRenderEta(doneFrames, fps);
   }
 
   function finalizeRenderStats(){
@@ -134,6 +149,32 @@
     renderElapsedEl.textContent = elapsedSec.toFixed(2);
     const fps = elapsedSec > 0 ? renderLastFrameCount / elapsedSec : 0;
     renderFpsEl.textContent = fps.toFixed(2);
+    setRenderEtaText('0.00');
+  }
+
+  function updateRenderEta(doneFrames, fps){
+    if (!renderEtaEl) {
+      return;
+    }
+    if (!(Number.isFinite(renderTotalFrames) && renderTotalFrames > 0)) {
+      setRenderEtaText('--');
+      return;
+    }
+    const remainingFrames = Math.max(0, renderTotalFrames - doneFrames);
+    if (remainingFrames === 0) {
+      setRenderEtaText('0.00');
+      return;
+    }
+    if (!(Number.isFinite(fps) && fps > 0)) {
+      setRenderEtaText('--');
+      return;
+    }
+    const etaSec = remainingFrames / fps;
+    if (Number.isFinite(etaSec)) {
+      setRenderEtaText((etaSec/60).toFixed(2));
+    } else {
+      setRenderEtaText('--');
+    }
   }
 
   resetRenderStats();
@@ -203,7 +244,7 @@
       bmp.close();
     } else if (type === 'progress') {
       log(`Frame ${ev.data.done}/${ev.data.total}`);
-      updateRenderStats(ev.data.done);
+      updateRenderStats(ev.data.done, ev.data.total);
     } else if (type === 'done') {
       // 完成Blob URLを受け取る
       const { url, sizeBytes } = ev.data;
@@ -466,12 +507,14 @@
     currentSceneModule = getSceneModuleValue();
     renderStartTime = performance.now();
     renderLastFrameCount = 0;
+    renderTotalFrames = total;
     if (renderElapsedEl) {
       renderElapsedEl.textContent = '0.00';
     }
     if (renderFpsEl) {
       renderFpsEl.textContent = '0.00';
     }
+    setRenderEtaText('--');
 
     worker.postMessage({ type:'resize', width, height });
 
